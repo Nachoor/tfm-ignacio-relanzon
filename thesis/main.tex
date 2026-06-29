@@ -1,0 +1,157 @@
+﻿\documentclass[a4paper,12pt]{article}
+
+% -------------------- PACKAGES --------------------
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[english,spanish]{babel}
+\usepackage{colortbl}
+\usepackage{xcolor}
+\usepackage{caption}
+\usepackage{float}
+% Figuras e imÃ¡genes
+\usepackage{graphicx}
+\graphicspath{{figures/}}
+% TikZ para figuras vectoriales
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta}
+% ConfiguraciÃ³n de pÃ¡gina
+\usepackage{geometry}
+\geometry{a4paper, total={160mm,240mm}, top=30mm}
+% FIX 1: headheight demasiado pequeÃ±o para fancyhdr
+\setlength{\headheight}{14.62pt}
+\addtolength{\topmargin}{-2.62pt}
+% Formato general
+\usepackage{setspace}
+\usepackage{fancyhdr}
+% NOTA: sectsty eliminado â€” conflicto con titlesec y warnings de \underbar/\underline
+\usepackage{titlesec}
+% HipervÃ­nculos
+\usepackage{hyperref}
+% Citation style
+\usepackage[round,authoryear]{natbib}
+\bibliographystyle{apalike}
+
+% -------------------- BABEL SPANISH CORRECTIONS --------------------
+\addto\captionsspanish{%
+  \renewcommand{\refname}{BibliografÃ­a}
+  \renewcommand{\listfigurename}{Lista de figuras}
+  \renewcommand{\listtablename}{Ãndice de tablas}
+}
+
+% -------------------- HEADER CUSTOMIZATION --------------------
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[R]{\thepage}
+\fancyhead[L]{\nouppercase{\leftmark}}
+\renewcommand{\headrulewidth}{0.4pt}
+\renewcommand{\sectionmark}[1]{\markboth{#1}{}}
+
+% -------------------- PARAGRAPH SPACING --------------------
+\setlength{\parskip}{1em}
+\setlength{\parindent}{0pt}
+
+% -------------------- DOCUMENT START --------------------
+\begin{document}
+
+% -------------------- TITLE PAGE --------------------
+% FIX 2: desactivar anclas de pÃ¡gina durante portada/front matter
+% para evitar "destination with the same identifier" de hyperref
+\hypersetup{pageanchor=false}
+
+\begin{titlepage}
+\begin{flushleft}
+\includegraphics[width=10cm]{MARCA_DATAI_red.png}
+\end{flushleft}
+\vspace{6cm}
+\centering
+\begin{center}
+{\LARGE\bfseries
+Desarrollo de un sistema de recomendaciÃ³n profesional basado en el anÃ¡lisis de brechas de competencias aplicado al sector de datos.}
+\end{center}
+\vspace{3.5cm}
+{\large\bfseries Trabajo Fin de MÃ¡ster\\
+MÃ¡ster Universitario en Big Data Science\\
+\vspace{1cm}
+Curso acadÃ©mico 2025--2026}
+\vspace{3.5cm}
+\large\textbf{Autor:} Ignacio RelanzÃ³n Mateo \\[0.2cm]
+\large\textbf{Tutor acadÃ©mico:} Montserrat Ana Miranda GalcerÃ¡n \\[0.2cm]
+\large Madrid, a \today
+\end{titlepage}
+
+\thispagestyle{empty}
+
+% -------------------- FRONT MATTER --------------------
+% FIX 3: un solo bloque pagenumbering gobble, sin repeticiÃ³n
+\pagenumbering{gobble}
+
+% Resumen
+\section*{Resumen}
+\markboth{Resumen}{Resumen}
+\addcontentsline{toc}{section}{Resumen}
+\input{chapters/01 - Resumen/01_resumen}
+\clearpage
+
+% Ãndice
+\tableofcontents
+\clearpage
+
+% Lista de figuras
+\pagenumbering{roman}
+\setcounter{page}{1}
+\addcontentsline{toc}{section}{Lista de figuras}
+\listoffigures
+
+% Lista de tablas
+\clearpage
+\addcontentsline{toc}{section}{Ãndice de tablas}
+\listoftables
+
+% Glosario
+\clearpage
+\section*{Glosario de AcrÃ³nimos}
+\markboth{Glosario}{Glosario}
+\addcontentsline{toc}{section}{Glosario de AcrÃ³nimos}
+\input{glosario_acronimos}
+
+% -------------------- MAIN BODY --------------------
+\clearpage
+% FIX 2 (cont.): reactivar anclas antes de la numeraciÃ³n arÃ¡biga
+\hypersetup{pageanchor=true}
+\pagenumbering{arabic}
+
+\section{IntroducciÃ³n}
+\input{chapters/02 - Introduccion/02_introduccion}
+\clearpage
+
+\section{Estado del Arte}
+\input{chapters/03 - Estado del arte/03_estadodelarte}
+\clearpage
+
+\section{Materiales y MÃ©todos}
+\input{chapters/03 - Materiales y MÃ©todos/03_materiales_metodos}
+\clearpage
+
+\section{Resultados}
+\input{chapters/04 - Resultados/04_resultados}
+\clearpage
+
+\section{DiscusiÃ³n}
+\input{chapters/05 - Discusion/05_discusion}
+\clearpage
+
+\section{Conclusiones y Trabajo Futuro}
+\input{chapters/06 - Conclusiones/06_conclusiones}
+
+% -------------------- BIBLIOGRAPHY --------------------
+\clearpage
+\addcontentsline{toc}{section}{BibliografÃ­a}
+\bibliography{bibliografia}
+
+% -------------------- APPENDICES --------------------
+\clearpage
+\section*{Anexos}
+\addcontentsline{toc}{section}{Anexos}
+\input{chapters/08 - Anexo/08_anexos}
+
+\end{document}

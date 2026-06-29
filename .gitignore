@@ -22,6 +22,14 @@ job_url_status.csv
 # --- LOGS ---
 logs/
 *.log
+**/streamlit*.log
+
+# --- COPIAS LEGACY / DUPLICADAS ---
+02_modelo/
+03_aplicacion/
+04_validacion/figuras_tfm/
+/figures/
+/docs/figures/
 
 # --- PYTHON ---
 __pycache__/

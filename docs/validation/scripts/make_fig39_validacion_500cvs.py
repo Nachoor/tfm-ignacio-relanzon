@@ -75,7 +75,7 @@ def main() -> None:
 
     fig.tight_layout()
 
-    for rel in ["docs/figures", "figures"]:
+    for rel in ["thesis/figures"]:
         out_dir = ROOT / rel
         out_dir.mkdir(parents=True, exist_ok=True)
         fig.savefig(out_dir / "fig39_validacion_500cvs.png", bbox_inches="tight")
