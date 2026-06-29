@@ -1,0 +1,8 @@
+{
+  "timestamp": "2026-03-07 13:44:04",
+  "masters_rows": 3425,
+  "courses_rows": 83104,
+  "jobs_rows": 29467,
+  "role_skill_rows": 219,
+  "output_dir": "C:\\Users\\Nacho\\Documents\\TFM\\ETL\\outputs\\semantic"
+}

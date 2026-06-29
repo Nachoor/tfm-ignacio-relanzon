@@ -1,0 +1,38 @@
+{
+  "n_candidates": 50,
+  "weights": {
+    "coverage": 0.8,
+    "semantic": 0.2
+  },
+  "metrics": {
+    "avg_recall_holdout": 0.9333,
+    "avg_gap_reduction": 0.7159,
+    "avg_ndcg10": 0.9987,
+    "recall_ci95": [
+      0.8733,
+      0.98
+    ],
+    "gap_reduction_ci95": [
+      0.6995,
+      0.7317
+    ],
+    "ndcg10_ci95": [
+      0.9964,
+      1.0
+    ]
+  },
+  "role_breakdown": {
+    "data_engineer": {
+      "n": 19,
+      "avg_recall": 0.9298,
+      "avg_gap_reduction": 0.718,
+      "avg_ndcg10": 1.0
+    },
+    "data_scientist": {
+      "n": 31,
+      "avg_recall": 0.9355,
+      "avg_gap_reduction": 0.7147,
+      "avg_ndcg10": 0.9979
+    }
+  }
+}

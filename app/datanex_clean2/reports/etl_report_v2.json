@@ -1,0 +1,26 @@
+{
+  "started_at": "2026-03-13 20:51:56",
+  "raw_dir": "C:\\Users\\Nacho\\Documents\\TFM\\modelos\\Datasets",
+  "out_dir": "C:\\Users\\Nacho\\Documents\\TFM\\app\\datanex_clean2",
+  "sample_rows": 0,
+  "raw_files": [
+    "Masters.csv",
+    "courses.csv",
+    "massive_jobs_final.csv",
+    "resume_data.csv"
+  ],
+  "candidate_rows": 9544,
+  "candidate_skill_rows": 31645,
+  "candidate_skills_unique": 41,
+  "jobs_rows": 36797,
+  "jobs_skill_rows": 151838,
+  "jobs_skills_unique": 44,
+  "masters_rows": 3673,
+  "masters_skill_rows": 5053,
+  "masters_skills_unique": 38,
+  "courses_rows": 83104,
+  "courses_skill_rows": 11512,
+  "courses_skills_unique": 45,
+  "dim_skills_rows": 45,
+  "finished_at": "2026-03-14 09:34:50"
+}

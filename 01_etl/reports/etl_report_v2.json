@@ -1,0 +1,26 @@
+{
+  "started_at": "2026-03-07 13:43:23",
+  "raw_dir": "C:\\Users\\Nacho\\Documents\\TFM\\Datasets",
+  "out_dir": "C:\\Users\\Nacho\\Documents\\TFM\\ETL",
+  "sample_rows": 0,
+  "raw_files": [
+    "Masters.csv",
+    "courses.csv",
+    "massive_jobs_final.csv",
+    "resume_data.csv"
+  ],
+  "candidate_rows": 9544,
+  "candidate_skill_rows": 31645,
+  "candidate_skills_unique": 41,
+  "jobs_rows": 29467,
+  "jobs_skill_rows": 134056,
+  "jobs_skills_unique": 44,
+  "masters_rows": 3425,
+  "masters_skill_rows": 4831,
+  "masters_skills_unique": 38,
+  "courses_rows": 83104,
+  "courses_skill_rows": 11510,
+  "courses_skills_unique": 45,
+  "dim_skills_rows": 45,
+  "finished_at": "2026-03-07 17:31:11"
+}

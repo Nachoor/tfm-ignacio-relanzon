@@ -1,0 +1,124 @@
+role_family,skill,demand_count,role_job_count,demand_ratio
+data_analyst,data analysis,1269,14659,0.086567978716147
+data_analyst,power bi,210,14659,0.0143256702367146
+data_analyst,data engineering,113,14659,0.0077085749368988
+data_analyst,sql,63,14659,0.0042977010710143
+data_analyst,aws,50,14659,0.0034108738658844
+data_analyst,python,48,14659,0.003274438911249
+data_analyst,java,34,14659,0.0023193942288014
+data_analyst,tableau,30,14659,0.0020465243195306
+data_analyst,data visualization,23,14659,0.0015690019783068
+data_analyst,forecasting,18,14659,0.0012279145917183
+data_analyst,databricks,17,14659,0.0011596971144007
+data_analyst,r,17,14659,0.0011596971144007
+data_analyst,etl,16,14659,0.001091479637083
+data_analyst,azure,15,14659,0.0010232621597653
+data_analyst,generative ai,15,14659,0.0010232621597653
+data_analyst,machine learning,11,14659,0.0007503922504945
+data_analyst,gcp,10,14659,0.0006821747731768
+data_analyst,snowflake,10,14659,0.0006821747731768
+data_analyst,microsoft fabric,7,14659,0.0004775223412238
+data_analyst,statistics,6,14659,0.0004093048639061
+data_analyst,api,5,14659,0.0003410873865884
+data_analyst,dbt,5,14659,0.0003410873865884
+data_analyst,deep learning,5,14659,0.0003410873865884
+data_analyst,hadoop,5,14659,0.0003410873865884
+data_analyst,excel,3,14659,0.000204652431953
+data_analyst,computer vision,1,14659,6.821747731768879e-05
+data_analyst,git,1,14659,6.821747731768879e-05
+data_analyst,nlp,1,14659,6.821747731768879e-05
+data_analyst,scala,1,14659,6.821747731768879e-05
+data_engineer,data engineering,3049,9390,0.3247071352502662
+data_engineer,aws,235,9390,0.0250266240681576
+data_engineer,data analysis,231,9390,0.0246006389776357
+data_engineer,python,151,9390,0.0160809371671991
+data_engineer,azure,134,9390,0.0142705005324813
+data_engineer,java,133,9390,0.0141640042598509
+data_engineer,databricks,85,9390,0.0090521831735889
+data_engineer,snowflake,79,9390,0.0084132055378061
+data_engineer,gcp,74,9390,0.0078807241746538
+data_engineer,machine learning,72,9390,0.0076677316293929
+data_engineer,sql,57,9390,0.0060702875399361
+data_engineer,etl,50,9390,0.0053248136315228
+data_engineer,dbt,34,9390,0.0036208732694355
+data_engineer,r,32,9390,0.0034078807241746
+data_engineer,microsoft fabric,26,9390,0.0027689030883919
+data_engineer,scala,19,9390,0.0020234291799787
+data_engineer,generative ai,18,9390,0.0019169329073482
+data_engineer,api,17,9390,0.0018104366347177
+data_engineer,kubernetes,14,9390,0.0014909478168264
+data_engineer,power bi,11,9390,0.001171458998935
+data_engineer,hadoop,10,9390,0.0010649627263045
+data_engineer,nosql,7,9390,0.0007454739084132
+data_engineer,airflow,4,9390,0.0004259850905218
+data_engineer,computer vision,4,9390,0.0004259850905218
+data_engineer,data visualization,4,9390,0.0004259850905218
+data_engineer,llm,4,9390,0.0004259850905218
+data_engineer,apache spark,1,9390,0.0001064962726304
+data_engineer,deep learning,1,9390,0.0001064962726304
+data_engineer,excel,1,9390,0.0001064962726304
+data_engineer,forecasting,1,9390,0.0001064962726304
+data_engineer,git,1,9390,0.0001064962726304
+data_engineer,nlp,1,9390,0.0001064962726304
+data_scientist,machine learning,278,6715,0.0413998510796723
+data_scientist,data analysis,203,6715,0.0302308265078183
+data_scientist,python,83,6715,0.0123603871928518
+data_scientist,generative ai,76,6715,0.0113179448994787
+data_scientist,r,69,6715,0.0102755026061057
+data_scientist,sql,34,6715,0.0050632911392405
+data_scientist,data engineering,33,6715,0.0049143708116157
+data_scientist,statistics,31,6715,0.0046165301563663
+data_scientist,nlp,27,6715,0.0040208488458674
+data_scientist,aws,26,6715,0.0038719285182427
+data_scientist,forecasting,26,6715,0.0038719285182427
+data_scientist,deep learning,21,6715,0.0031273268801191
+data_scientist,llm,16,6715,0.0023827252419955
+data_scientist,computer vision,12,6715,0.0017870439314966
+data_scientist,api,8,6715,0.0011913626209977
+data_scientist,snowflake,7,6715,0.001042442293373
+data_scientist,microsoft fabric,5,6715,0.0007446016381236
+data_scientist,gcp,4,6715,0.0005956813104988
+data_scientist,power bi,4,6715,0.0005956813104988
+data_scientist,java,3,6715,0.0004467609828741
+data_scientist,azure,2,6715,0.0002978406552494
+data_scientist,etl,2,6715,0.0002978406552494
+data_scientist,kubernetes,2,6715,0.0002978406552494
+data_scientist,mathematics,2,6715,0.0002978406552494
+data_scientist,tableau,2,6715,0.0002978406552494
+data_scientist,databricks,1,6715,0.0001489203276247
+data_scientist,docker,1,6715,0.0001489203276247
+data_scientist,git,1,6715,0.0001489203276247
+data_scientist,hadoop,1,6715,0.0001489203276247
+data_scientist,pytorch,1,6715,0.0001489203276247
+data_scientist,scala,1,6715,0.0001489203276247
+data_scientist,tensorflow,1,6715,0.0001489203276247
+ml_engineer,machine learning,2244,8390,0.26746126340882
+ml_engineer,generative ai,304,8390,0.036233611442193
+ml_engineer,python,139,8390,0.0165673420738974
+ml_engineer,aws,121,8390,0.0144219308700834
+ml_engineer,data analysis,99,8390,0.0117997616209773
+ml_engineer,llm,86,8390,0.0102502979737783
+ml_engineer,azure,75,8390,0.0089392133492252
+ml_engineer,data engineering,73,8390,0.0087008343265792
+ml_engineer,java,62,8390,0.0073897497020262
+ml_engineer,computer vision,52,8390,0.0061978545887961
+ml_engineer,deep learning,35,8390,0.0041716328963051
+ml_engineer,nlp,22,8390,0.002622169249106
+ml_engineer,r,20,8390,0.00238379022646
+ml_engineer,api,18,8390,0.002145411203814
+ml_engineer,databricks,17,8390,0.002026221692491
+ml_engineer,kubernetes,15,8390,0.001787842669845
+ml_engineer,sql,13,8390,0.001549463647199
+ml_engineer,gcp,11,8390,0.001311084624553
+ml_engineer,microsoft fabric,5,8390,0.000595947556615
+ml_engineer,forecasting,3,8390,0.000357568533969
+ml_engineer,snowflake,3,8390,0.000357568533969
+ml_engineer,time series,3,8390,0.000357568533969
+ml_engineer,mathematics,2,8390,0.000238379022646
+ml_engineer,power bi,2,8390,0.000238379022646
+ml_engineer,airflow,1,8390,0.000119189511323
+ml_engineer,data visualization,1,8390,0.000119189511323
+ml_engineer,docker,1,8390,0.000119189511323
+ml_engineer,etl,1,8390,0.000119189511323
+ml_engineer,scala,1,8390,0.000119189511323
+ml_engineer,statistics,1,8390,0.000119189511323

@@ -1,0 +1,23 @@
+{
+  "timestamp": "2026-03-07 19:07:50",
+  "n_candidates": 50,
+  "base": {
+    "avg_recall": 0.96,
+    "avg_miss_rate": 0.04,
+    "avg_gap_reduction": 0.7347349078452019,
+    "avg_precision_like": 0.0503637613205829
+  },
+  "reranker": {
+    "avg_recall": 0.96,
+    "avg_miss_rate": 0.04,
+    "avg_gap_reduction": 0.6624733790322026,
+    "avg_precision_like": 0.056852694607924546
+  },
+  "delta": {
+    "recall": 0.0,
+    "miss_rate": 0.0,
+    "gap_reduction": -0.07226152881299941,
+    "precision_like": 0.006488933287341638
+  },
+  "artifact": "C:\\Users\\Nacho\\Documents\\TFM\\ETL\\outputs\\evaluation\\base_vs_reranker.csv"
+}

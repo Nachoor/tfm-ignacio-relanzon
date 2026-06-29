@@ -1,0 +1,2 @@
+role,n_candidates,avg_recall_holdout,avg_miss_rate,avg_gap_reduction,avg_precision_like,avg_gap_error_abs,avg_normalized_gap_error,avg_gap_before,avg_gap_after
+other_data_role,8,0.8125,0.1875,0.7348108043909751,0.03461723198229945,9.125,0.2651891956090248,34.375,9.125

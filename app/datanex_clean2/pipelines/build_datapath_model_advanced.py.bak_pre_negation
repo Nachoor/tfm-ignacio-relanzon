@@ -1,0 +1,3465 @@
+﻿import argparse
+import json
+import pickle
+import re
+import os
+import unicodedata
+import functools
+from datetime import datetime
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+import requests
+
+
+def norm_text(x):
+    if pd.isna(x):
+        return ""
+    return re.sub(r"\s+", " ", str(x)).strip()
+
+
+def fix_spaced_letters(text: str) -> str:
+    # Convert patterns like "P y t h o n" -> "Python"
+    pattern = re.compile(r"(?:\b[^\W\d_]\s){2,}[^\W\d_]\b", flags=re.UNICODE)
+    year_pattern = re.compile(r"\b([12])\s+(\d)\s+(\d)\s+(\d)\b")
+
+    def _join_letters(match):
+        return match.group(0).replace(" ", "")
+
+    out = pattern.sub(_join_letters, text)
+    out = year_pattern.sub(r"\1\2\3\4", out)
+    return norm_text(out)
+
+
+def read_resume_pdf_text(path: Path) -> str:
+    # Primary parser
+    try:
+        from pypdf import PdfReader
+
+        reader = PdfReader(str(path))
+        parts = []
+        for page in reader.pages:
+            parts.append(page.extract_text() or "")
+        return fix_spaced_letters(" ".join(parts))
+    except Exception:
+        pass
+
+    # Fallback parser
+    try:
+        import pdfplumber
+
+        parts = []
+        with pdfplumber.open(str(path)) as pdf:
+            for page in pdf.pages:
+                parts.append(page.extract_text() or "")
+        return fix_spaced_letters(" ".join(parts))
+    except Exception:
+        pass
+
+    # Fallback parser (PyMuPDF)
+    try:
+        import fitz  # pymupdf
+
+        parts = []
+        with fitz.open(str(path)) as doc:
+            for page in doc:
+                parts.append(page.get_text("text") or "")
+        return fix_spaced_letters(" ".join(parts))
+    except Exception:
+        pass
+
+    return ""
+
+
+def load_taxonomy(path: Path):
+    return json.loads(path.read_text(encoding="utf-8-sig"))
+
+
+def normalize_match_text(text: str) -> str:
+    txt = str(text or "").lower()
+    txt = "".join(c for c in unicodedata.normalize("NFD", txt) if unicodedata.category(c) != "Mn")
+    # OCR fix: join frequent split prepositions/articles without collapsing acronyms (e.g., MSc).
+    txt = re.sub(r"\bd\s+e\b", "de", txt)
+    txt = re.sub(r"\be\s+n\b", "en", txt)
+    txt = re.sub(r"\ba\s+l\b", "al", txt)
+    txt = re.sub(r"\bl\s+a\b", "la", txt)
+    txt = re.sub(r"\bd\s+el\b", "del", txt)
+    txt = re.sub(r"\ba\s+n\b", "an", txt)
+    txt = re.sub(r"\bi\s+n\b", "in", txt)
+    txt = re.sub(r"\bo\s+f\b", "of", txt)
+    txt = re.sub(r"\bt\s+o\b", "to", txt)
+    txt = re.sub(r"\s+", " ", txt).strip()
+    return txt
+
+
+def contains_term(text: str, term: str) -> bool:
+    t = f" {normalize_match_text(text)} "
+    q = normalize_match_text(term)
+    if q.startswith(" ") or q.endswith(" "):
+        return q in t
+    if not re.match(r"^[a-z0-9]+$", q):
+        return re.search(rf"(?<![a-z0-9]){re.escape(q)}(?![a-z0-9])", t) is not None
+    return re.search(rf"\b{re.escape(q)}\b", t) is not None
+
+
+SKILL_CANONICAL_SYNONYMS = {
+    "amazon_web_services": "aws",
+    "aws_cloud": "aws",
+    "microsoft_azure": "azure",
+    "ms_azure": "azure",
+    "google_cloud_platform": "gcp",
+    "google_cloud": "gcp",
+    "apache_spark": "spark",
+    "py_spark": "spark",
+    "pyspark": "spark",
+    "k8s": "kubernetes",
+    "ml_ops": "mlops",
+    "machine_learning_ops": "mlops",
+    "powerbi": "power_bi",
+    "business_intelligence": "bi",
+}
+
+SKILL_TOPIC_MAP = {
+    "deep_learning": "deep_learning_topic",
+    "tensorflow": "deep_learning_topic",
+    "keras": "deep_learning_topic",
+    "pytorch": "pytorch_topic",
+    "machine_learning": "ml_topic",
+    "scikit_learn": "ml_topic",
+    "python": "python_topic",
+    "numpy": "python_topic",
+    "pandas": "python_topic",
+    "aws": "cloud_topic",
+    "azure": "cloud_topic",
+    "gcp": "cloud_topic",
+    "docker": "mlops_topic",
+    "kubernetes": "mlops_topic",
+    "mlops": "mlops_topic",
+    "llm": "genai_topic",
+    "generative_ai": "genai_topic",
+    "nlp": "nlp_topic",
+    "sql": "sql_topic",
+}
+
+SIGNATURE_SKILLS = {
+    "ml_engineer": {
+        "machine_learning", "deep_learning", "pytorch", "tensorflow",
+        "scikit_learn", "mlops", "llm", "generative_ai",
+        "computer_vision", "nlp",
+    },
+    "data_scientist": {
+        "machine_learning", "statistics", "deep_learning", "r", "nlp",
+        "generative_ai", "llm", "data_science", "scikit_learn",
+    },
+    "data_engineer": {
+        "data_engineering", "spark", "airflow", "databricks",
+        "snowflake", "kafka", "etl", "hadoop", "dbt", "pipeline",
+    },
+    "data_analyst": {
+        "data_analysis", "power_bi", "tableau", "excel", "sql",
+        "data_visualization", "reporting", "looker", "forecasting",
+    },
+}
+
+
+@functools.lru_cache(maxsize=8192)
+def _canonical_skill_cached(skill_str: str) -> str:
+    """Inner cached function — always receives a clean str."""
+    s = normalize_match_text(skill_str)
+    if s in {"c++", "c#"}:
+        return s
+    s = re.sub(r"[^a-z0-9]+", "_", s).strip("_")
+    return SKILL_CANONICAL_SYNONYMS.get(s, s)
+
+
+def canonical_skill_name(skill: str) -> str:
+    """Public API: accepts any type, caches on normalized str key."""
+    return _canonical_skill_cached(str(skill or ""))
+
+
+def role_terms(target_role: str) -> list[str]:
+    txt = re.sub(r"[_\-]+", " ", str(target_role or "").strip()).lower()
+    return [t for t in re.split(r"[^a-z0-9]+", txt) if len(t) > 2]
+
+
+def text_role_overlap_score(text_value: str, target_role: str) -> float | None:
+    terms = role_terms(target_role)
+    if not terms:
+        return None
+    txt = str(text_value or "").lower()
+    if not txt.strip():
+        return None
+    hit = sum(1 for t in terms if t in txt)
+    return float(max(0.0, min(1.0, hit / len(terms))))
+
+
+def extract_skills(text: str, taxonomy: dict) -> list[str]:
+    txt = norm_text(text).lower()
+    if not txt:
+        return []
+    found = []
+    for skill, aliases in taxonomy.items():
+        for alias in aliases:
+            if contains_term(txt, alias):
+                found.append(skill)
+                break
+    return sorted(set(found))
+
+
+MONTH_ALIASES = {
+    "jan": 1, "january": 1, "ene": 1, "enero": 1,
+    "feb": 2, "february": 2, "febrero": 2,
+    "mar": 3, "march": 3, "marzo": 3,
+    "apr": 4, "april": 4, "abr": 4, "abril": 4,
+    "may": 5, "mayo": 5,
+    "jun": 6, "june": 6, "junio": 6,
+    "jul": 7, "july": 7, "julio": 7,
+    "aug": 8, "august": 8, "ago": 8, "agosto": 8,
+    "sep": 9, "sept": 9, "september": 9, "septiembre": 9,
+    "oct": 10, "october": 10, "octubre": 10,
+    "nov": 11, "november": 11, "noviembre": 11,
+    "dec": 12, "december": 12, "dic": 12, "diciembre": 12,
+}
+
+SECTION_KEYWORDS = {
+    "experience": ["experience", "work experience", "professional experience", "employment", "experiencia", "trayectoria", "career"],
+    "education": ["education", "formacion", "formación", "academic", "estudios", "degree", "master", "universidad", "university"],
+    "projects": ["projects", "project", "proyectos", "portfolio", "portfolio projects"],
+    "skills": ["skills", "technical skills", "habilidades", "competencias", "stack", "technologies"],
+    "certifications": ["certifications", "certification", "certificados", "certificaciones", "courses", "cursos"],
+}
+
+DOMAIN_KEYWORDS = {
+    "data_analytics": ["data analyst", "analytics", "analysis", "business intelligence", "bi", "reporting", "tableau", "power bi", "sql"],
+    "machine_learning": ["machine learning", "ml", "model training", "classification", "regression", "xgboost", "scikit"],
+    "nlp": ["nlp", "natural language", "text mining", "tokenization", "named entity", "transformer", "bert"],
+    "llm_genai": ["llm", "gpt", "genai", "generative ai", "prompt engineering", "rag", "langchain", "fine-tuning", "llama"],
+    "data_engineering": ["data engineering", "etl", "elt", "airflow", "dbt", "spark", "hadoop", "pipeline"],
+    "bi_reporting": ["dashboard", "reporting", "kpi", "tableau", "power bi", "looker"],
+    "cloud_mlops_devops": ["aws", "gcp", "azure", "mlops", "devops", "docker", "kubernetes", "terraform", "ci/cd"],
+}
+
+ROLE_DOMAIN_HINTS = {
+    "data_scientist": {"machine_learning", "nlp", "llm_genai", "data_analytics"},
+    "ml_engineer": {"machine_learning", "llm_genai", "cloud_mlops_devops", "data_engineering"},
+    "data_engineer": {"data_engineering", "cloud_mlops_devops", "bi_reporting"},
+    "data_analyst": {"data_analytics", "bi_reporting"},
+    "other_data_role": {"data_analytics", "machine_learning", "data_engineering"},
+}
+
+# EDUCATION_SKILL_INFERENCE_RULES v2 — calibradas empíricamente sobre 13 CVs anotados
+# (validación manual: micro-F1 0.764 → 0.836 tras eliminar FPs sistemáticos)
+# Cambios respecto a v1:
+#   - "mathematics": eliminadas probability, mathematical modelling, linear algebra
+#     (generaban 16 FPs sobre CVs con formación matemática sin esas skills explícitas)
+#   - "statistics": eliminado data modelling (genérico, baja especificidad)
+#   - "big_data": eliminados distributed computing (5 FPs) y data processing (4 FPs)
+#   - "artificial_intelligence": eliminado data modelling (inferencia demasiado laxa)
+EDUCATION_SKILL_INFERENCE_RULES = [
+    {
+        "name": "mathematics",
+        "terms": ["mathematics", "math", "applied mathematics", "matematicas", "matematica"],
+        "skills": ["statistics", "data analysis"],
+        "reason": "Mathematics degree/background",
+    },
+    {
+        "name": "statistics",
+        "terms": ["statistics", "estadistica", "statistical"],
+        "skills": ["statistical analysis", "probability", "regression"],
+        "reason": "Statistics degree/background",
+    },
+    {
+        "name": "computer_science",
+        "terms": ["computer science", "informatics", "software engineering", "ingenieria informatica"],
+        "skills": ["programming", "algorithms", "data structures", "software engineering"],
+        "reason": "Computer Science degree/background",
+    },
+    {
+        "name": "data_science",
+        "terms": ["data science", "ciencia de datos", "analytics"],
+        "skills": ["machine learning", "data analysis", "data visualization", "python", "statistics"],
+        "reason": "Data Science studies",
+    },
+    {
+        "name": "big_data",
+        "terms": ["big data", "data engineering", "data platform"],
+        "skills": ["machine learning", "data engineering"],
+        "reason": "Big Data studies",
+    },
+    {
+        "name": "artificial_intelligence",
+        "terms": ["artificial intelligence", "ai", "inteligencia artificial"],
+        "skills": ["machine learning", "deep learning", "python"],
+        "reason": "Artificial Intelligence studies",
+    },
+]
+
+EXPERIENCE_SKILL_INFERENCE_RULES = [
+    {
+        "name": "data_analyst",
+        "terms": ["data analyst", "analista de datos", "business intelligence analyst", "bi analyst"],
+        "skills": ["data analysis", "sql", "data visualization", "statistics"],
+        "reason": "Data Analyst experience",
+    },
+    {
+        "name": "rpa_developer",
+        "terms": ["rpa developer", "uipath developer", "automation developer"],
+        "skills": ["automation", "python", "process optimization"],
+        "reason": "RPA/Automation experience",
+    },
+    {
+        "name": "ml_intern",
+        "terms": ["machine learning intern", "ml intern", "data science intern"],
+        "skills": ["machine learning", "python", "data modelling"],
+        "reason": "ML/Data internship",
+    },
+    {
+        "name": "data_engineer",
+        "terms": ["data engineer", "etl developer", "data platform engineer"],
+        "skills": ["data engineering", "etl", "sql", "data processing"],
+        "reason": "Data Engineering experience",
+    },
+]
+
+MASTER_FOCUS_KEYWORDS = {
+    "data_science": [
+        "data science", "big data science", "statistical learning", "predictive modeling", "modeling",
+    ],
+    "ai_ml": [
+        "artificial intelligence", "machine learning", "deep learning", "computer vision", "natural language",
+        "nlp", "llm", "genai", "neural network",
+    ],
+    "data_engineering": [
+        "data engineering", "etl", "elt", "data pipeline", "spark", "hadoop", "airflow", "dbt", "warehouse", "lakehouse",
+    ],
+    "analytics_bi": [
+        "business analytics", "data analytics", "business intelligence", "power bi", "tableau", "reporting", "dashboard",
+    ],
+    "computer_science": [
+        "computer science", "informatics", "software engineering", "distributed systems", "algorithms",
+    ],
+}
+
+ROLE_PREFERRED_MASTER_FOCUS = {
+    "data_scientist": {"data_science", "ai_ml", "analytics_bi"},
+    "ml_engineer": {"ai_ml", "data_engineering", "computer_science"},
+    "data_engineer": {"data_engineering", "computer_science", "ai_ml"},
+    "data_analyst": {"analytics_bi", "data_science"},
+    "other_data_role": {"data_science", "ai_ml", "analytics_bi", "data_engineering"},
+}
+
+ROLE_SKILL_COMBOS = {
+    "data_scientist": [
+        {"python", "sql", "machine_learning"},
+        {"statistics", "data_analysis"},
+        {"machine_learning", "feature_engineering"},
+    ],
+    "ml_engineer": [
+        {"python", "machine_learning", "pytorch"},
+        {"python", "machine_learning", "tensorflow"},
+        {"docker", "kubernetes", "aws"},
+    ],
+    "data_engineer": [
+        {"python", "sql", "etl"},
+        {"python", "sql", "spark"},
+        {"spark", "airflow", "dbt"},
+        {"python", "etl", "aws"},
+        {"python", "etl", "azure"},
+        {"python", "etl", "gcp"},
+        {"data_engineering", "aws"},
+    ],
+    "data_analyst": [
+        {"sql", "data_analysis", "excel"},
+        {"power_bi", "tableau", "data_visualization"},
+        {"statistics", "forecasting"},
+    ],
+    "other_data_role": [
+        {"python", "sql"},
+        {"data_analysis", "statistics"},
+    ],
+}
+
+ROLE_PRIOR_SKILLS = {
+    "data_engineer": {
+        "core": ["sql", "python", "etl", "data_pipelines", "spark", "docker", "kubernetes"],
+        "important": ["airflow", "dbt", "aws", "azure", "gcp", "data_engineering"],
+    },
+    "data_scientist": {
+        "core": ["python", "sql", "machine_learning", "statistics", "data_analysis"],
+        "important": ["pandas", "numpy", "r", "deep_learning", "nlp", "llm"],
+    },
+    "ml_engineer": {
+        "core": ["python", "machine_learning", "deep_learning", "pytorch", "tensorflow"],
+        "important": ["scikit_learn", "pandas", "numpy", "llm", "generative_ai", "aws", "mlops", "docker", "kubernetes"],
+    },
+    "data_analyst": {
+        "core": ["sql", "excel", "data_visualization", "statistics", "power_bi"],
+        "important": ["data_analysis", "tableau", "forecasting", "python", "machine_learning"],
+    },
+    "other_data_role": {
+        "core": ["python", "sql", "data_analysis"],
+        "important": ["statistics", "machine_learning", "power_bi"],
+    },
+}
+
+MATCH_COMPONENT_WEIGHTS = {
+    "weighted_presence": 0.50,
+    "core_coverage": 0.25,
+    "important_coverage": 0.10,
+    "complementary_coverage": 0.05,
+    "semantic_fit": 0.10,
+}
+
+# When market signal is healthy, avoid injecting manual priors.
+MIN_MARKET_CORE_FOR_NO_PRIOR = 3
+MIN_MARKET_IMPORTANT_FOR_NO_PRIOR = 4
+
+_MATCH_CALIBRATOR_CACHE = None
+
+EDU_LEVEL_PATTERNS = {
+    "phd": [
+        r"\bphd\b", r"\bdoctorate\b", r"\bdoctoral\b", r"\bdoctorado\b",
+    ],
+    "master": [
+        r"\bmaster\b", r"\bmasters\b", r"\bm\.sc\b", r"\bmsc\b", r"\bmaestr[ií]a\b",
+        r"\bpostgrado\b", r"\bposgrado\b",
+    ],
+    "bachelor": [
+        r"\bbachelor\b", r"\bgrado\b", r"\bdegree\b", r"\bingenier[ií]a\b", r"\blicenciatura\b",
+    ],
+}
+
+DATA_EDU_TERMS = [
+    "data science", "big data", "machine learning", "artificial intelligence", "ai",
+    "analytics", "business analytics", "data analytics", "statistics", "estadistica",
+    "computer science", "informatics", "data engineering", "business intelligence",
+]
+
+STEM_EDU_TERMS = [
+    "engineering", "ingenier", "mathematics", "math", "physics", "computer science",
+    "informatics", "statistics", "econometrics", "quantitative",
+]
+
+NON_TECH_MASTER_TERMS = [
+    "leadership", "integral leadership", "mba", "marketing", "communications",
+    "human resources", "hr", "public relations", "branding", "sales",
+]
+
+SENIORITY_ORDER = {
+    "student_intern": 0,
+    "junior": 1,
+    "mid_level": 2,
+    "senior": 3,
+    "lead_manager": 4,
+}
+
+SEMANTIC_INFERENCE_MAX_SKILLS = 4
+SEMANTIC_INFERENCE_THRESHOLDS = {
+    "sentence-transformers": 0.42,
+    "tfidf": 0.18,
+}
+
+SEMANTIC_FREE_INFERENCE_ALLOWLIST = {
+    "api",
+    "aws",
+    "azure",
+    "data_analysis",
+    "data_engineering",
+    "data_visualization",
+    "deep_learning",
+    "docker",
+    "etl",
+    "forecasting",
+    "gcp",
+    "git",
+    "kubernetes",
+    "machine_learning",
+    "mlops",
+    "nlp",
+    "numpy",
+    "pandas",
+    "power_bi",
+    "python",
+    "pytorch",
+    "sql",
+    "tableau",
+    "tensorflow",
+}
+
+CONTEXTUAL_NLP_ALLOWLIST = {
+    "api",
+    "aws",
+    "azure",
+    "data_analysis",
+    "data_visualization",
+    "docker",
+    "gcp",
+    "kubernetes",
+    "machine_learning",
+    "mlops",
+    "nlp",
+    "power_bi",
+    "tableau",
+}
+
+CONTEXTUAL_NLP_PATTERNS = [
+    {
+        "terms": ["model deployment", "model serving", "serving models", "production models", "deployed models"],
+        "skills": ["mlops", "api"],
+        "reason": "Production deployment context",
+    },
+    {
+        "terms": ["containerized", "containerised", "containers", "container orchestration"],
+        "skills": ["docker"],
+        "reason": "Containerization context",
+    },
+    {
+        "terms": ["orchestrated workloads", "orchestration", "cluster workloads", "managed clusters"],
+        "skills": ["kubernetes", "mlops"],
+        "reason": "Workload orchestration context",
+    },
+    {
+        "terms": ["text classification", "document classification", "language models", "language understanding", "named entity"],
+        "skills": ["nlp"],
+        "reason": "Language processing context",
+    },
+    {
+        "terms": ["predictive models", "predictive modeling", "prediction models", "classification models", "regression models"],
+        "skills": ["machine_learning"],
+        "reason": "Predictive modeling context",
+    },
+    {
+        "terms": ["business dashboards", "dashboarding", "automated reporting", "commercial reporting", "kpi reporting"],
+        "skills": ["power_bi", "tableau", "data_visualization"],
+        "reason": "Dashboard and reporting context",
+    },
+    {
+        "terms": ["cloud workloads", "cloud platform", "cloud infrastructure", "cloud environment"],
+        "skills": ["aws", "azure", "gcp"],
+        "reason": "Cloud infrastructure context",
+    },
+]
+
+
+def _normalize_for_search(text: str) -> str:
+    return normalize_match_text(norm_text(text))
+
+
+@functools.lru_cache(maxsize=8192)
+def infer_master_focus_tags(text: str) -> list[str]:
+    low = _normalize_for_search(text)
+    if not low:
+        return []
+    scored = []
+    for tag, kws in MASTER_FOCUS_KEYWORDS.items():
+        hits = sum(1 for kw in kws if contains_term(low, kw))
+        if hits > 0:
+            scored.append((tag, hits))
+    scored.sort(key=lambda x: x[1], reverse=True)
+    return [t for t, _ in scored]
+
+
+def split_resume_sections(text: str) -> dict:
+    raw_lines = [ln.strip() for ln in str(text or "").splitlines()]
+    lines = [ln for ln in raw_lines if ln]
+    sections = {k: [] for k in SECTION_KEYWORDS.keys()}
+    current = "experience"
+    for ln in lines:
+        low = ln.lower()
+        assigned = None
+        for sec, keys in SECTION_KEYWORDS.items():
+            if any(k in low for k in keys):
+                assigned = sec
+                break
+        if assigned:
+            current = assigned
+            continue
+        sections[current].append(ln)
+
+    full = _normalize_for_search(text)
+    out = {}
+    for sec in SECTION_KEYWORDS.keys():
+        sec_txt = " ".join(sections.get(sec, []))
+        if not sec_txt:
+            anchors = [k for k in SECTION_KEYWORDS[sec] if k in full]
+            if anchors:
+                idx = full.find(anchors[0])
+                sec_txt = full[max(0, idx - 400) : min(len(full), idx + 1800)]
+        out[sec] = norm_text(sec_txt)
+    out["full_text"] = norm_text(text)
+    return out
+
+
+def _skill_display_name(skill: str) -> str:
+    return str(skill or "").replace("_", " ").strip()
+
+
+def _build_resume_semantic_chunks(sections: dict) -> list[dict]:
+    chunks = []
+    seen = set()
+    section_order = ["experience", "projects", "education", "skills", "certifications", "full_text"]
+    split_pattern = re.compile(r"[\n\r]+|(?<=[\.\!\?;:])\s+|[•\-]{1,2}\s+")
+    for section_name in section_order:
+        raw = norm_text((sections or {}).get(section_name, ""))
+        if not raw:
+            continue
+        for piece in split_pattern.split(raw):
+            chunk = norm_text(piece)
+            if len(chunk) < 30 or len(chunk) > 320:
+                continue
+            key = normalize_match_text(chunk)
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            chunks.append({
+                "section": section_name,
+                "text": chunk,
+            })
+    return chunks
+
+
+def infer_semantic_skills_from_resume(
+    sections: dict,
+    taxonomy: dict,
+    existing_skills: set[str] | None = None,
+    max_skills: int = SEMANTIC_INFERENCE_MAX_SKILLS,
+) -> tuple[list[dict], str]:
+    existing = {canonical_skill_name(s) for s in (existing_skills or set()) if canonical_skill_name(s)}
+    chunks = _build_resume_semantic_chunks(sections or {})
+    if not chunks or not taxonomy:
+        return [], "none"
+
+    skill_rows = []
+    skill_docs = []
+    for skill, aliases in (taxonomy or {}).items():
+        can = canonical_skill_name(skill)
+        if not can or can in existing:
+            continue
+        alias_terms = []
+        for alias in ([skill] + list(aliases or [])):
+            a = norm_text(alias)
+            if not a:
+                continue
+            norm_alias = normalize_match_text(a)
+            if norm_alias in alias_terms:
+                continue
+            alias_terms.append(norm_alias)
+            if len(alias_terms) >= 8:
+                break
+        if not alias_terms or can not in SEMANTIC_FREE_INFERENCE_ALLOWLIST:
+            continue
+        skill_rows.append({
+            "skill": can,
+            "display": _skill_display_name(skill),
+            "aliases": alias_terms,
+        })
+        skill_docs.append(" ; ".join(alias_terms))
+
+    if not skill_docs:
+        return [], "none"
+
+    chunk_docs = [c["text"] for c in chunks]
+    try:
+        emb, emb_mode = embed_texts(skill_docs + chunk_docs)
+        skill_emb = emb[: len(skill_docs)]
+        chunk_emb = emb[len(skill_docs) :]
+        sim = cosine_similarity_matrix(skill_emb, chunk_emb)
+    except Exception:
+        return [], "none"
+
+    threshold = float(SEMANTIC_INFERENCE_THRESHOLDS.get(emb_mode, 0.18))
+    out = []
+    for idx, row in enumerate(skill_rows):
+        score_vec = np.asarray(sim[idx]).ravel()
+        if score_vec.size < 1:
+            continue
+        best_idx = int(np.argmax(score_vec))
+        best_sim = float(score_vec[best_idx])
+        if best_sim < threshold:
+            continue
+        support = chunks[best_idx]
+        section = str(support.get("section", "resume") or "resume")
+        if section not in {"experience", "projects", "skills"}:
+            continue
+        section_bonus = 0.05 if section in {"experience", "projects"} else 0.0
+        weight = min(0.82, 0.55 + section_bonus + max(0.0, best_sim - threshold) * 0.8)
+        out.append({
+            "skill": row["display"],
+            "source": "semantic_nlp",
+            "reason": f"Semantic NLP match in {section}: {support.get('text', '')[:160]}",
+            "weight": round(float(weight), 2),
+            "similarity": round(best_sim, 3),
+        })
+
+    out.sort(key=lambda item: (float(item.get("similarity", 0.0)), float(item.get("weight", 0.0))), reverse=True)
+    return out[:max_skills], emb_mode
+
+
+def infer_contextual_nlp_skills(
+    sections: dict,
+    existing_skills: set[str] | None = None,
+) -> list[dict]:
+    existing = {canonical_skill_name(s) for s in (existing_skills or set()) if canonical_skill_name(s)}
+    full_text = _normalize_for_search((sections or {}).get("full_text", ""))
+    if not full_text:
+        return []
+
+    inferred = []
+    for rule in CONTEXTUAL_NLP_PATTERNS:
+        terms = rule.get("terms", []) or []
+        if not any(contains_term(full_text, term) for term in terms):
+            continue
+        for skill in rule.get("skills", []) or []:
+            can = canonical_skill_name(skill)
+            if not can or can in existing or can not in CONTEXTUAL_NLP_ALLOWLIST:
+                continue
+            inferred.append({
+                "skill": _skill_display_name(can),
+                "source": "semantic_nlp",
+                "reason": f"{rule.get('reason', 'Contextual NLP match')}: {terms[0]}",
+                "weight": 0.64,
+                "similarity": 0.2,
+            })
+            existing.add(can)
+    return inferred
+
+
+def _to_month_index(year: int, month: int) -> int:
+    return year * 12 + max(1, min(12, month))
+
+
+def _year_from_month_index(idx: int) -> int:
+    return int((max(1, idx) - 1) // 12)
+
+
+def _month_from_month_index(idx: int) -> int:
+    return int(((max(1, idx) - 1) % 12) + 1)
+
+
+def _month_from_token(tok: str):
+    if tok is None:
+        return None
+    t = re.sub(r"[^a-záéíóúüñ]", "", str(tok or "").lower())
+    if not t:
+        return None
+    if t in MONTH_ALIASES:
+        return MONTH_ALIASES[t]
+    # OCR fallback: token may contain month substring (e.g., "ltantsept").
+    for k, v in MONTH_ALIASES.items():
+        if len(k) >= 3 and k in t:
+            return v
+    return None
+
+
+def extract_date_ranges(text: str) -> list[tuple[int, int, float]]:
+    txt = str(text or "")
+    now = datetime.utcnow()
+    current_month_idx = _to_month_index(now.year, now.month)
+    ranges = []
+
+    pattern = re.compile(
+        r"(?:(?P<m1>[A-Za-zÁÉÍÓÚáéíóúñÑ]{3,12})\s+)?(?P<y1>20\d{2}|19\d{2})\s*[-–to]+\s*(?:(?P<m2>[A-Za-zÁÉÍÓÚáéíóúñÑ]{3,12})\s+)?(?P<y2>20\d{2}|19\d{2}|present|current|actualidad|now)",
+        flags=re.IGNORECASE,
+    )
+    for m in pattern.finditer(txt):
+        y1 = int(m.group("y1"))
+        y2_raw = str(m.group("y2")).lower()
+        if y2_raw in {"present", "current", "actualidad", "now"}:
+            y2 = now.year
+            m2 = now.month
+        else:
+            y2 = int(y2_raw)
+            m2 = _month_from_token(m.group("m2")) if m.group("m2") else 12
+            if m2 is None:
+                m2 = 12
+        m1 = _month_from_token(m.group("m1")) if m.group("m1") else 1
+        if m1 is None:
+            m1 = 1
+        m1_raw = m.group("m1")
+        m2_raw_tok = m.group("m2")
+        if (m1_raw is None and m2_raw_tok is None and y2_raw not in {"present", "current", "actualidad", "now"} and y1 == int(y2_raw)):
+            # Ambiguous "2025 - 2025" pattern; often from merged OCR lines.
+            continue
+        start = _to_month_index(y1, m1)
+        end = min(_to_month_index(y2, m2), current_month_idx)
+        if end >= start:
+            ranges.append((start, end, 0.9))
+
+    year_pair = re.compile(r"\b(19\d{2}|20\d{2})\s*[-–]\s*(19\d{2}|20\d{2}|present|current)\b", flags=re.IGNORECASE)
+    for m in year_pair.finditer(txt):
+        y1 = int(m.group(1))
+        y2_raw = str(m.group(2)).lower()
+        y2 = now.year if y2_raw in {"present", "current"} else int(y2_raw)
+        start = _to_month_index(y1, 1)
+        end = min(_to_month_index(y2, now.month if y2_raw in {"present", "current"} else 12), current_month_idx)
+        if end >= start:
+            ranges.append((start, end, 0.7))
+
+    dedup = []
+    for r in sorted(ranges, key=lambda x: (x[0], x[1])):
+        if dedup and abs(r[0] - dedup[-1][0]) <= 1 and abs(r[1] - dedup[-1][1]) <= 1:
+            continue
+        dedup.append(r)
+    return dedup
+
+
+WORK_CONTEXT_TERMS = [
+    "consultant", "analyst", "engineer", "scientist", "specialist", "associate",
+    "coordinator", "manager", "lead", "delegate", "developer", "architect",
+    "responsible", "client", "company", "empleo", "puesto", "cargo", "trabajo",
+    "engineered", "developed", "implemented", "pipeline", "project", "projects",
+    "consultor", "analista", "ingeniero",
+]
+
+EDU_CONTEXT_TERMS = [
+    "university", "universidad", "graduated", "grade", "degree", "master", "bachelor",
+    "erasmus", "high school", "academic", "student", "estudios", "formacion", "formación",
+    "colegio", "school",
+]
+
+INTERNSHIP_TERMS = ["intern", "internship", "trainee", "becario", "practicas", "prácticas", "graduate program"]
+NON_PROF_CONTEXT_TERMS = ["volunteer", "voluntariado", "ngo", "tutor", "tutoring", "coach", "field mission"]
+
+
+def extract_experience_section_date_ranges(text: str) -> list[tuple[int, int, float]]:
+    txt = str(text or "")
+    low = txt.lower()
+    now = datetime.utcnow()
+    current_month_idx = _to_month_index(now.year, now.month)
+    out = []
+    pattern = re.compile(
+        r"(?:(?P<m1>[A-Za-zÁÉÍÓÚáéíóúñÑ]{3,12})\s+)?(?P<y1>20\d{2}|19\d{2})\s*[-–to]+\s*(?:(?P<m2>[A-Za-zÁÉÍÓÚáéíóúñÑ]{3,12})\s+)?(?P<y2>20\d{2}|19\d{2}|present|current|actualidad|now)",
+        flags=re.IGNORECASE,
+    )
+    for m in pattern.finditer(txt):
+        ctx_start = max(0, m.start() - 120)
+        ctx_end = min(len(low), m.end() + 120)
+        ctx = low[ctx_start:ctx_end]
+        work_hits = sum(1 for t in WORK_CONTEXT_TERMS if t in ctx)
+        edu_hits = sum(1 for t in EDU_CONTEXT_TERMS if t in ctx)
+        if work_hits < 1:
+            continue
+        if edu_hits >= 2 and work_hits < 2:
+            continue
+
+        y1 = int(m.group("y1"))
+        y2_raw = str(m.group("y2")).lower()
+        if y2_raw in {"present", "current", "actualidad", "now"}:
+            y2 = now.year
+            m2 = now.month
+        else:
+            y2 = int(y2_raw)
+            m2 = _month_from_token(m.group("m2")) if m.group("m2") else 12
+            if m2 is None:
+                m2 = 12
+        m1 = _month_from_token(m.group("m1")) if m.group("m1") else 1
+        if m.group("m1") and m1 is None:
+            continue
+        if m1 is None:
+            m1 = 1
+        start = _to_month_index(y1, m1)
+        end = min(_to_month_index(y2, m2), current_month_idx)
+        if end >= start:
+            conf = 0.8 if work_hits >= 2 else 0.68
+            out.append((start, end, conf))
+
+    dedup = []
+    for r in sorted(out, key=lambda x: (x[0], x[1], -x[2])):
+        if dedup and abs(r[0] - dedup[-1][0]) <= 1 and abs(r[1] - dedup[-1][1]) <= 1:
+            continue
+        dedup.append(r)
+    return dedup
+
+
+def extract_professional_date_ranges(text: str) -> list[tuple[int, int, float]]:
+    txt = str(text or "")
+    low = txt.lower()
+    now = datetime.utcnow()
+    current_month_idx = _to_month_index(now.year, now.month)
+    out = []
+
+    pattern = re.compile(
+        r"(?:(?P<m1>[A-Za-zÁÉÍÓÚáéíóúñÑ]{3,12})\s+)?(?P<y1>20\d{2}|19\d{2})\s*[-–to]+\s*(?:(?P<m2>[A-Za-zÁÉÍÓÚáéíóúñÑ]{3,12})\s+)?(?P<y2>20\d{2}|19\d{2}|present|current|actualidad|now)",
+        flags=re.IGNORECASE,
+    )
+    for m in pattern.finditer(txt):
+        ctx_start = max(0, m.start() - 140)
+        ctx_end = min(len(low), m.end() + 140)
+        ctx = low[ctx_start:ctx_end]
+        work_hits = sum(1 for t in WORK_CONTEXT_TERMS if t in ctx)
+        edu_hits = sum(1 for t in EDU_CONTEXT_TERMS if t in ctx)
+        intern_hits = sum(1 for t in INTERNSHIP_TERMS if t in ctx)
+        non_prof_hits = sum(1 for t in NON_PROF_CONTEXT_TERMS if t in ctx)
+        is_open_ended = str(m.group("y2")).lower() in {"present", "current", "actualidad", "now"}
+        if intern_hits > 0:
+            continue
+        if non_prof_hits > 0 and work_hits < 2:
+            continue
+        if work_hits < 1 and not (is_open_ended and edu_hits == 0):
+            continue
+        if edu_hits >= 2 and work_hits <= 1:
+            continue
+        if edu_hits >= (work_hits + 2):
+            continue
+
+        y1 = int(m.group("y1"))
+        y2_raw = str(m.group("y2")).lower()
+        if y2_raw in {"present", "current", "actualidad", "now"}:
+            y2 = now.year
+            m2 = now.month
+        else:
+            y2 = int(y2_raw)
+            m2 = _month_from_token(m.group("m2")) if m.group("m2") else 12
+            if m2 is None:
+                m2 = 12
+        m1 = _month_from_token(m.group("m1")) if m.group("m1") else 1
+        if m.group("m1") and m1 is None:
+            # Corrupted month token (OCR): skip unreliable range.
+            continue
+        if m1 is None:
+            m1 = 1
+        start = _to_month_index(y1, m1)
+        end = min(_to_month_index(y2, m2), current_month_idx)
+        if end >= start:
+            conf = 0.9 if work_hits >= 2 else (0.78 if is_open_ended else 0.75)
+            out.append((start, end, conf))
+
+    return out
+
+
+def extract_internship_date_ranges(text: str) -> list[tuple[int, int, float]]:
+    txt = str(text or "")
+    low = txt.lower()
+    now = datetime.utcnow()
+    current_month_idx = _to_month_index(now.year, now.month)
+    out = []
+    pattern = re.compile(
+        r"(?:(?P<m1>[A-Za-zÁÉÍÓÚáéíóúñÑ]{3,12})\s+)?(?P<y1>20\d{2}|19\d{2})\s*[-–to]+\s*(?:(?P<m2>[A-Za-zÁÉÍÓÚáéíóúñÑ]{3,12})\s+)?(?P<y2>20\d{2}|19\d{2}|present|current|actualidad|now)",
+        flags=re.IGNORECASE,
+    )
+    for m in pattern.finditer(txt):
+        ctx_start = max(0, m.start() - 110)
+        ctx_end = min(len(low), m.end() + 110)
+        ctx = low[ctx_start:ctx_end]
+        intern_hits = sum(1 for t in INTERNSHIP_TERMS if t in ctx)
+        if intern_hits <= 0:
+            continue
+        work_hits = sum(1 for t in WORK_CONTEXT_TERMS if t in ctx)
+        edu_hits = sum(1 for t in EDU_CONTEXT_TERMS if t in ctx)
+        if edu_hits >= 2 and work_hits <= 1:
+            continue
+        y1 = int(m.group("y1"))
+        y2_raw = str(m.group("y2")).lower()
+        if y2_raw in {"present", "current", "actualidad", "now"}:
+            y2 = now.year
+            m2 = now.month
+        else:
+            y2 = int(y2_raw)
+            m2 = _month_from_token(m.group("m2")) if m.group("m2") else 12
+            if m2 is None:
+                m2 = 12
+        m1 = _month_from_token(m.group("m1")) if m.group("m1") else 1
+        if m.group("m1") and m1 is None:
+            continue
+        if m1 is None:
+            m1 = 1
+        start = _to_month_index(y1, m1)
+        end = min(_to_month_index(y2, m2), current_month_idx)
+        if end >= start:
+            # Internship ranges are usually short; avoid swallowing multi-year education spans.
+            months = int(end - start + 1)
+            has_grad_program = "graduate program" in ctx
+            if months > 18 and not has_grad_program:
+                continue
+            out.append((start, end, 0.85))
+    return out
+
+
+def merge_month_ranges(ranges: list[tuple[int, int, float]]) -> list[tuple[int, int]]:
+    if not ranges:
+        return []
+    base = sorted([(s, e) for s, e, _ in ranges], key=lambda x: x[0])
+    out = [base[0]]
+    for s, e in base[1:]:
+        ls, le = out[-1]
+        if s <= le + 1:
+            out[-1] = (ls, max(le, e))
+        else:
+            out.append((s, e))
+    return out
+
+
+def total_months_from_ranges(ranges: list[tuple[int, int]]) -> int:
+    return int(sum(max(0, e - s + 1) for s, e in ranges))
+
+
+def subtract_month_ranges(
+    base_ranges: list[tuple[int, int]],
+    subtract_ranges: list[tuple[int, int]],
+) -> list[tuple[int, int]]:
+    if not base_ranges:
+        return []
+    if not subtract_ranges:
+        return list(base_ranges)
+    out = []
+    for bs, be in base_ranges:
+        segments = [(bs, be)]
+        for ss, se in subtract_ranges:
+            next_segments = []
+            for cs, ce in segments:
+                if se < cs or ss > ce:
+                    next_segments.append((cs, ce))
+                    continue
+                if ss > cs:
+                    next_segments.append((cs, ss - 1))
+                if se < ce:
+                    next_segments.append((se + 1, ce))
+            segments = next_segments
+            if not segments:
+                break
+        out.extend(segments)
+    return merge_month_ranges([(s, e, 1.0) for s, e in out])
+
+
+def infer_graduation_year(education_text: str) -> int | None:
+    txt = str(education_text or "")
+    m = re.search(r"graduated\s*[:\-]?\s*(19\d{2}|20\d{2})", txt, flags=re.IGNORECASE)
+    if m:
+        return int(m.group(1))
+    m2 = re.search(r"(graduado|graduation|completed)\s*[:\-]?\s*(19\d{2}|20\d{2})", txt, flags=re.IGNORECASE)
+    if m2:
+        return int(m2.group(2))
+    years = [int(y) for y in re.findall(r"\b(19\d{2}|20\d{2})\b", txt)]
+    if not years:
+        return None
+    current_year = datetime.utcnow().year + 1
+    years = [y for y in years if 1950 <= y <= current_year]
+    return max(years) if years else None
+
+
+def infer_seniority(total_years: float, text: str) -> tuple[str, float]:
+    """Infiere nivel de seniority combinando señales léxicas explícitas y años de experiencia.
+
+    Prioridad de señales (de mayor a menor):
+      1. Marcadores de intern/trainee con experiencia baja → student_intern
+      2. Marcadores de manager/lead CON respaldo numérico suficiente → lead_manager / senior
+      3. Marcadores explícitos de senior/junior → senior / junior (con umbral mínimo)
+      4. Reglas numéricas puras cuando no hay señal léxica
+    """
+    low = _normalize_for_search(text)
+    has_intern_markers = any(k in low for k in ["intern", "trainee", "student", "becario", "graduate program"])
+    has_manager_markers = any(k in low for k in ["lead", "principal", "head of", "manager", "director"])
+    has_senior_markers = any(k in low for k in ["senior", "sr."])
+    has_junior_markers = any(k in low for k in ["junior", "jr."])
+
+    # 1. Intern/trainee siempre prevalece si experiencia es baja
+    if has_intern_markers and total_years < 1.5:
+        return "student_intern", 0.85
+
+    # 2. Manager/lead markers: requiere experiencia mínima para ser creíble
+    #    >= 6 años → lead_manager (alta confianza)
+    #    3–6 años → senior (señal léxica de liderazgo pero aún no lead; confianza moderada)
+    if has_manager_markers and not has_intern_markers:
+        if total_years >= 6:
+            return "lead_manager", 0.80
+        if total_years >= 3.0:
+            # Liderazgo con experiencia media: probablemente senior técnico o team lead junior
+            return "senior", 0.70
+
+    # 3. Marcador explícito "senior" con respaldo numérico mínimo
+    #    Umbral bajado de 4 a 3.5 años para cubrir seniors con progresión rápida
+    if has_senior_markers and total_years >= 3.5:
+        return "senior", 0.80
+
+    # 4. Marcador explícito "junior" (señal fuerte independientemente de años)
+    if has_junior_markers:
+        return "junior", 0.75
+
+    # 5. Reglas numéricas puras (sin señal léxica clara)
+    if total_years < 1.0:
+        return "student_intern", 0.65
+    if total_years < 2.5:
+        return "junior", 0.70
+    if total_years < 5.5:
+        return "mid_level", 0.70
+    if total_years < 8.5:
+        return "senior", 0.70
+    return "lead_manager", 0.70
+
+
+def infer_career_stage(total_years: float, years_since_graduation: float | None, inferred_seniority: str) -> str:
+    if inferred_seniority in {"senior", "lead_manager"}:
+        return "advanced_stage"
+    if inferred_seniority == "mid_level":
+        return "growth_stage"
+    if inferred_seniority in {"student_intern", "junior"}:
+        if years_since_graduation is None:
+            return "early_career" if total_years < 1.5 else "growth_stage"
+        if years_since_graduation <= 2.0 or total_years < 1.2:
+            return "early_career"
+        return "growth_stage"
+    if total_years >= 5.0:
+        return "advanced_stage"
+    if total_years < 1.2:
+        return "early_career"
+    return "growth_stage"
+
+
+def infer_education_profile(education_text: str, full_text: str, grad_year: int | None = None) -> dict:
+    edu = _normalize_for_search(education_text)
+    full = _normalize_for_search(full_text)
+    # Prioritize explicit education section. Use full-text only as weak fallback.
+    txt = edu if len(edu) >= 60 else f"{edu} {full[:3000]}".strip()
+    full_limited = full[:22000]
+
+    def _master_context_hits(source_text: str, window: int = 150) -> tuple[int, int]:
+        data_hits_local = 0
+        non_tech_hits_local = 0
+        for m in re.finditer(r"\b(master|masters|m\.sc|msc|maestr[ií]a|postgrado|posgrado)\b", source_text, flags=re.IGNORECASE):
+            s = max(0, m.start() - window)
+            e = min(len(source_text), m.end() + window)
+            ctx = source_text[s:e]
+            data_hits_local += sum(1 for t in DATA_EDU_TERMS if contains_term(ctx, t))
+            non_tech_hits_local += sum(1 for t in NON_TECH_MASTER_TERMS if contains_term(ctx, t))
+        return data_hits_local, non_tech_hits_local
+
+    def _has_data_master_in_source(source_text: str, window: int = 95) -> bool:
+        strong_master_data_terms = [
+            "big data", "data science", "machine learning", "artificial intelligence",
+            "business analytics", "data analytics",
+        ]
+        for m in re.finditer(r"\b(master|masters|m\.sc|msc|maestr[ií]a|postgrado|posgrado)\b", source_text, flags=re.IGNORECASE):
+            s = max(0, m.start() - window)
+            e = min(len(source_text), m.end() + window)
+            ctx = source_text[s:e]
+            if any(contains_term(ctx, t) for t in strong_master_data_terms):
+                return True
+            d_hits = sum(1 for t in DATA_EDU_TERMS if contains_term(ctx, t))
+            n_hits = sum(1 for t in NON_TECH_MASTER_TERMS if contains_term(ctx, t))
+            if d_hits >= 2:
+                return True
+            if d_hits >= 1 and n_hits == 0:
+                return True
+        return False
+
+    has_phd = any(re.search(p, txt, flags=re.IGNORECASE) for p in EDU_LEVEL_PATTERNS["phd"]) or any(
+        re.search(p, full_limited, flags=re.IGNORECASE) for p in EDU_LEVEL_PATTERNS["phd"]
+    )
+    has_master_local = any(re.search(p, txt, flags=re.IGNORECASE) for p in EDU_LEVEL_PATTERNS["master"])
+    has_master_full = any(re.search(p, full_limited, flags=re.IGNORECASE) for p in EDU_LEVEL_PATTERNS["master"])
+    has_master = has_phd or has_master_local or has_master_full
+    has_bachelor = any(re.search(p, txt, flags=re.IGNORECASE) for p in EDU_LEVEL_PATTERNS["bachelor"])
+
+    data_hits_edu = sum(1 for t in DATA_EDU_TERMS if contains_term(edu, t))
+    stem_hits_edu = sum(1 for t in STEM_EDU_TERMS if contains_term(edu, t))
+    data_hits_txt = sum(1 for t in DATA_EDU_TERMS if contains_term(txt, t))
+    stem_hits_txt = sum(1 for t in STEM_EDU_TERMS if contains_term(txt, t))
+    non_tech_hits = sum(1 for t in NON_TECH_MASTER_TERMS if contains_term(edu, t))
+
+    master_ctx_data_hits_edu, master_ctx_non_tech_hits_edu = _master_context_hits(edu, window=160)
+    master_ctx_data_hits_full, master_ctx_non_tech_hits_full = _master_context_hits(full_limited, window=140)
+    master_ctx_data_hits = master_ctx_data_hits_edu + master_ctx_data_hits_full
+    master_ctx_non_tech_hits = master_ctx_non_tech_hits_edu + master_ctx_non_tech_hits_full
+
+    has_data_master_edu = _has_data_master_in_source(edu, window=100)
+    has_data_master_full = _has_data_master_in_source(full_limited, window=80)
+    has_data_related_master = bool(
+        has_master and (
+            has_data_master_edu
+            or has_data_master_full
+            or (master_ctx_non_tech_hits == 0 and data_hits_edu >= 1 and stem_hits_edu >= 1)
+        )
+    )
+    # Master focus tags to avoid redundant "same-domain" recommendations.
+    master_focus_tags = []
+    if has_master:
+        focus_from_edu = infer_master_focus_tags(education_text)
+        focus_from_full = infer_master_focus_tags(full_text[:5000])
+        ordered = []
+        for tag in (focus_from_edu + focus_from_full):
+            if tag not in ordered:
+                ordered.append(tag)
+        # If education explicitly states a Data Science master, keep it as primary focus.
+        edu_low = _normalize_for_search(education_text)
+        full_low = _normalize_for_search(full_text[:9000])
+        explicit_data_science_master = False
+        if has_data_related_master:
+            explicit_data_science_master = (
+                contains_term(edu_low, "big data science")
+                or contains_term(edu_low, "data science")
+                or contains_term(full_low, "big data science")
+                or contains_term(full_low, "data science")
+            )
+        if explicit_data_science_master:
+            ordered = ["data_science"] + [t for t in ordered if t != "data_science"]
+        master_focus_tags = ordered[:4]
+    master_focus_primary = master_focus_tags[0] if master_focus_tags else "unknown"
+
+    # Confidence grows when explicit level + domain terms are present.
+    relevance_base = 0.0
+    if has_phd and (data_hits_edu >= 1 or stem_hits_edu >= 2):
+        relevance_base += 0.95
+    elif has_data_related_master:
+        relevance_base += 0.82
+    elif has_master:
+        # Generic master (e.g., leadership) should not heavily boost data suitability.
+        relevance_base += 0.26
+    elif has_bachelor:
+        relevance_base += 0.45
+    relevance_base += min(0.25, 0.05 * data_hits_edu) + min(0.12, 0.03 * stem_hits_edu)
+    if (data_hits_edu == 0 or master_ctx_data_hits == 0) and has_master and (non_tech_hits >= 1 or master_ctx_non_tech_hits >= 1):
+        relevance_base -= 0.12
+    if data_hits_edu == 0 and stem_hits_edu == 0 and has_master:
+        relevance_base -= 0.07
+    # Weak fallback from full text to avoid missing cases with noisy CV layout.
+    relevance_base += min(0.06, 0.01 * max(0, data_hits_txt - data_hits_edu))
+    relevance_base += min(0.03, 0.008 * max(0, stem_hits_txt - stem_hits_edu))
+    if grad_year is not None:
+        relevance_base += 0.03
+    data_edu_relevance = float(max(0.0, min(1.0, relevance_base)))
+
+    # Role-specific relevance (more strict for DS/ML/DE).
+    role_relevance = {
+        "data_analyst": float(max(0.0, min(1.0, 0.75 * data_edu_relevance + 0.10))),
+        "other_data_role": float(max(0.0, min(1.0, 0.70 * data_edu_relevance + 0.12))),
+        "data_scientist": float(max(0.0, min(1.0, data_edu_relevance))),
+        "ml_engineer": float(max(0.0, min(1.0, 0.95 * data_edu_relevance))),
+        "data_engineer": float(max(0.0, min(1.0, 0.90 * data_edu_relevance))),
+    }
+
+    highest = "none"
+    if has_phd:
+        highest = "phd"
+    elif has_master:
+        highest = "master"
+    elif has_bachelor:
+        highest = "bachelor"
+
+    return {
+        "highest_education_level": highest,
+        "has_master_degree": bool(has_master),
+        "has_phd_degree": bool(has_phd),
+        "has_bachelor_degree": bool(has_bachelor),
+        "has_data_related_master": has_data_related_master,
+        "has_stem_background": bool(stem_hits_edu >= 1 or stem_hits_txt >= 1),
+        "master_focus_tags": master_focus_tags,
+        "master_focus_primary": master_focus_primary,
+        "education_data_relevance": round(data_edu_relevance, 3),
+        "education_relevance_by_role": {k: round(v, 3) for k, v in role_relevance.items()},
+        "education_signal_confidence": round(float(max(0.3, min(0.95, 0.45 + 0.08 * data_hits_edu + 0.04 * stem_hits_edu))), 2),
+    }
+
+
+def detect_internship_signal(text: str) -> float:
+    low = _normalize_for_search(text)
+    markers = INTERNSHIP_TERMS
+    hits = sum(1 for m in markers if m in low)
+    if hits <= 0:
+        return 0.0
+    return min(1.0, 0.35 + 0.18 * hits)
+
+
+def build_skill_evidence_map(text: str, taxonomy: dict, sections: dict) -> tuple[dict, dict]:
+    full = _normalize_for_search(text)
+    exp_txt = _normalize_for_search(sections.get("experience", ""))
+    prj_txt = _normalize_for_search(sections.get("projects", ""))
+    edu_txt = _normalize_for_search(sections.get("education", ""))
+    skl_txt = _normalize_for_search(sections.get("skills", ""))
+    crt_txt = _normalize_for_search(sections.get("certifications", ""))
+
+    evidence = {}
+    confidence = {}
+    for skill, aliases in taxonomy.items():
+        if not any(contains_term(full, a) for a in aliases):
+            continue
+        in_exp = any(contains_term(exp_txt, a) for a in aliases)
+        in_prj = any(contains_term(prj_txt, a) for a in aliases)
+        in_edu = any(contains_term(edu_txt, a) for a in aliases)
+        in_skl = any(contains_term(skl_txt, a) for a in aliases)
+        in_crt = any(contains_term(crt_txt, a) for a in aliases)
+        if in_exp:
+            evidence[skill] = "professional"
+            confidence[skill] = 0.9
+        elif in_prj:
+            evidence[skill] = "project"
+            confidence[skill] = 0.75
+        elif in_edu or in_crt:
+            evidence[skill] = "academic"
+            confidence[skill] = 0.65
+        elif in_skl:
+            evidence[skill] = "declared"
+            confidence[skill] = 0.55
+        else:
+            evidence[skill] = "declared"
+            confidence[skill] = 0.5
+    return evidence, confidence
+
+
+def estimate_domain_experience(sections: dict, total_years: float, skills_evidence: dict) -> dict:
+    exp_text = _normalize_for_search(sections.get("experience", ""))
+    prj_text = _normalize_for_search(sections.get("projects", ""))
+    domain_scores = {}
+    for domain, kws in DOMAIN_KEYWORDS.items():
+        exp_hits = sum(1 for k in kws if contains_term(exp_text, k))
+        prj_hits = sum(1 for k in kws if contains_term(prj_text, k))
+        skill_hits = 0
+        for sk, ev in skills_evidence.items():
+            sk_t = sk.replace("_", " ").lower()
+            if any(k in sk_t for k in kws):
+                skill_hits += 2 if ev == "professional" else 1
+        domain_scores[domain] = (2.0 * exp_hits) + (1.2 * prj_hits) + (0.8 * skill_hits)
+
+    max_raw = max(domain_scores.values()) if domain_scores else 0.0
+    years = {}
+    for domain, raw in domain_scores.items():
+        if raw <= 0 or max_raw <= 0:
+            years[domain] = 0.0
+            continue
+        rel = raw / max_raw
+        years[domain] = round(total_years * rel * (0.7 + 0.3 * min(1.0, raw / 6.0)), 2)
+    return years
+
+
+def _infer_skills_from_rules(text: str, rules: list[dict], source: str) -> list[dict]:
+    low = _normalize_for_search(text)
+    if not low:
+        return []
+    out = []
+    for rule in rules:
+        terms = [str(t or "").strip().lower() for t in (rule.get("terms", []) or []) if str(t or "").strip()]
+        if not terms:
+            continue
+        if not any(contains_term(low, t) for t in terms):
+            continue
+        reason = str(rule.get("reason", f"{source} inference")).strip()
+        for sk in (rule.get("skills", []) or []):
+            s = str(sk or "").strip()
+            if not s:
+                continue
+            out.append({"skill": s, "source": source, "reason": reason})
+    return out
+
+
+def infer_implicit_skills(sections: dict) -> tuple[list[dict], list[dict]]:
+    education_text = " ".join(
+        [str(sections.get("education", "") or ""), str(sections.get("full_text", "") or "")[:4000]]
+    )
+    experience_text = " ".join(
+        [str(sections.get("experience", "") or ""), str(sections.get("projects", "") or "")]
+    )
+    edu_inf = _infer_skills_from_rules(education_text, EDUCATION_SKILL_INFERENCE_RULES, "education")
+    exp_inf = _infer_skills_from_rules(experience_text, EXPERIENCE_SKILL_INFERENCE_RULES, "experience")
+    return edu_inf, exp_inf
+
+
+def build_candidate_profile_from_resume(resume_text: str, taxonomy: dict) -> dict:
+    raw_text = str(resume_text or "")
+    txt = norm_text(raw_text)
+    sections = split_resume_sections(raw_text)
+    exp_text = sections.get("experience", "")
+    full_text = sections.get("full_text", "")
+    exp_prof_ranges = extract_professional_date_ranges(exp_text)
+    full_prof_ranges = extract_professional_date_ranges(full_text)
+    professional_ranges = list(exp_prof_ranges)
+    for r in full_prof_ranges:
+        if not any(abs(r[0] - x[0]) <= 1 and abs(r[1] - x[1]) <= 1 for x in professional_ranges):
+            professional_ranges.append(r)
+
+    internship_ranges = extract_internship_date_ranges(exp_text)
+    if len(internship_ranges) < 1:
+        internship_ranges = extract_internship_date_ranges(full_text)
+
+    # Conservative fallback: if professional ranges are empty, infer from context-aware ranges only.
+    if len(professional_ranges) < 1:
+        generic_exp_ranges = extract_experience_section_date_ranges(exp_text)
+        if len(generic_exp_ranges) < 1:
+            generic_exp_ranges = extract_professional_date_ranges(full_text)
+        professional_ranges = generic_exp_ranges
+
+    grad_year = infer_graduation_year(sections.get("education", ""))
+    if grad_year is None:
+        grad_year = infer_graduation_year(full_text)
+    education_profile = infer_education_profile(sections.get("education", ""), full_text, grad_year=grad_year)
+
+    if grad_year is not None and professional_ranges:
+        now_year = datetime.utcnow().year
+        has_current_post_grad_role = any(
+            (_year_from_month_index(e) >= now_year) and float(c) >= 0.78
+            for _, e, c in professional_ranges
+        )
+        kept_prof = []
+        moved_ranges = []
+        current_idx = _to_month_index(datetime.utcnow().year, datetime.utcnow().month)
+        for s, e, c in professional_ranges:
+            start_year = _year_from_month_index(s)
+            start_month = _month_from_month_index(s)
+            end_year = _year_from_month_index(e)
+            should_move = False
+            if has_current_post_grad_role:
+                # If there is already current post-grad experience, treat clear pre-grad ranges as pre-professional.
+                if end_year < grad_year:
+                    should_move = True
+                elif end_year == grad_year:
+                    is_current_range = e >= (current_idx - 1)
+                    if is_current_range:
+                        should_move = False
+                    else:
+                        if start_year < grad_year:
+                            should_move = True
+                        late_grad_year_prof = (start_year == grad_year and start_month >= 7 and float(c) >= 0.85)
+                        if (not should_move) and (not late_grad_year_prof) and float(c) <= 0.85:
+                            should_move = True
+            elif internship_ranges and end_year <= grad_year and float(c) <= 0.75:
+                should_move = True
+
+            if should_move:
+                moved_ranges.append((s, e, 0.75))
+            else:
+                kept_prof.append((s, e, c))
+        professional_ranges = kept_prof
+        if moved_ranges:
+            internship_ranges = internship_ranges + moved_ranges
+
+    merged_prof_raw = merge_month_ranges(professional_ranges)
+    merged_intern = merge_month_ranges(internship_ranges) if internship_ranges else []
+    # Avoid counting the same timeline as both professional and internship.
+    merged_prof = subtract_month_ranges(merged_prof_raw, merged_intern)
+    prof_months = total_months_from_ranges(merged_prof)
+    internship_months_est = total_months_from_ranges(merged_intern) if merged_intern else 0
+    internship_months_est = int(min(internship_months_est, 24))
+    experience_years_total = round(prof_months / 12.0, 2)
+
+    now_year = datetime.utcnow().year
+    years_since_graduation = None if grad_year is None else max(0.0, round(now_year - grad_year, 1))
+    inferred_seniority, seniority_conf = infer_seniority(experience_years_total, txt)
+    career_stage = infer_career_stage(experience_years_total, years_since_graduation, inferred_seniority)
+    # If explicit internship ranges were not found, keep soft signal estimation.
+    if internship_months_est <= 0:
+        internship_signal = detect_internship_signal(exp_text + " " + full_text)
+        internship_months_est = int(round(min(12, max(prof_months, 6)) * internship_signal)) if internship_signal > 0 else 0
+    non_intern_months = max(0, prof_months)
+    non_intern_years = round(non_intern_months / 12.0, 2)
+    if experience_years_total < 0.25 and grad_year is not None:
+        inferred_seniority = "student_intern"
+        career_stage = "early_career"
+        seniority_conf = max(float(seniority_conf), 0.8)
+    elif experience_years_total >= 0.5 and inferred_seniority == "student_intern":
+        # If there is already 6+ months of non-intern experience, avoid over-penalizing as intern.
+        inferred_seniority = "junior"
+        seniority_conf = max(float(seniority_conf), 0.65)
+    elif experience_years_total < 0.25 and internship_months_est > 0:
+        inferred_seniority = "student_intern"
+        career_stage = "early_career"
+        seniority_conf = max(float(seniority_conf), 0.75)
+    if experience_years_total < 0.25 and grad_year is not None:
+        profile_experience_type = "graduate_no_experience"
+    elif experience_years_total < 0.25 and internship_months_est <= 0:
+        profile_experience_type = "no_experience_detected"
+    elif experience_years_total < 0.5 and internship_months_est > 0:
+        profile_experience_type = "internship_profile"
+    elif experience_years_total < 2.5:
+        profile_experience_type = "early_professional"
+    else:
+        profile_experience_type = "professional_experience"
+
+    skills_evidence, skills_conf = build_skill_evidence_map(txt, taxonomy, sections)
+    explicit_skills = sorted(skills_evidence.keys())
+    inferred_edu, inferred_exp = infer_implicit_skills(sections)
+    semantic_existing = set(explicit_skills)
+    semantic_existing.update(str(x.get("skill", "")).strip() for x in inferred_edu if str(x.get("skill", "")).strip())
+    semantic_existing.update(str(x.get("skill", "")).strip() for x in inferred_exp if str(x.get("skill", "")).strip())
+    inferred_semantic, semantic_mode = infer_semantic_skills_from_resume(
+        sections,
+        taxonomy,
+        existing_skills=semantic_existing,
+    )
+    semantic_existing.update(str(x.get("skill", "")).strip() for x in inferred_semantic if str(x.get("skill", "")).strip())
+    inferred_semantic += infer_contextual_nlp_skills(
+        sections,
+        existing_skills=semantic_existing,
+    )
+
+    merged = {}
+    for sk in explicit_skills:
+        can = canonical_skill_name(sk)
+        if not can:
+            continue
+        merged[can] = {
+            "skill_display": sk,
+            "sources": {"explicit"},
+            "reasons": {"Explicitly listed in CV"},
+            "weight": 1.0,
+        }
+    for item in inferred_edu + inferred_exp + inferred_semantic:
+        sk = str(item.get("skill", "")).strip()
+        if not sk:
+            continue
+        can = canonical_skill_name(sk)
+        if not can:
+            continue
+        src = str(item.get("source", "education")).strip().lower()
+        reason = str(item.get("reason", f"Inferred from {src}")).strip()
+        if src == "education":
+            w = 0.7
+        elif src == "semantic_nlp":
+            w = float(item.get("weight", 0.62) or 0.62)
+        else:
+            w = 0.8
+        if can not in merged:
+            merged[can] = {
+                "skill_display": sk,
+                "sources": {src},
+                "reasons": {reason},
+                "weight": w,
+            }
+        else:
+            merged[can]["sources"].add(src)
+            merged[can]["reasons"].add(reason)
+            if "explicit" not in merged[can]["sources"]:
+                merged[can]["weight"] = max(float(merged[can]["weight"]), float(w))
+            if {"education", "experience"}.issubset(merged[can]["sources"]) and "explicit" not in merged[can]["sources"]:
+                merged[can]["weight"] = max(float(merged[can]["weight"]), 0.85)
+
+    for can, item in merged.items():
+        if "explicit" in item["sources"]:
+            continue
+        srcs = item["sources"]
+        if "education" in srcs and "experience" in srcs:
+            skills_evidence[item["skill_display"]] = "inferred_education_experience"
+            skills_conf[item["skill_display"]] = 0.8
+        elif "education" in srcs:
+            skills_evidence[item["skill_display"]] = "inferred_education"
+            skills_conf[item["skill_display"]] = 0.7
+        elif "experience" in srcs:
+            skills_evidence[item["skill_display"]] = "inferred_experience"
+            skills_conf[item["skill_display"]] = 0.8
+        elif "semantic_nlp" in srcs:
+            skills_evidence[item["skill_display"]] = "inferred_semantic_nlp"
+            skills_conf[item["skill_display"]] = max(
+                0.6,
+                min(0.85, float(item.get("weight", 0.65))),
+            )
+
+    skills_detected = sorted(item["skill_display"] for item in merged.values())
+    inferred_skills = [
+        {
+            "skill": item["skill_display"],
+            "source": " + ".join(sorted(s for s in item["sources"] if s != "explicit")) if "explicit" not in item["sources"] else "explicit",
+            "reason": "; ".join(sorted(item["reasons"])),
+            "weight": round(float(item["weight"]), 2),
+        }
+        for item in merged.values()
+        if "explicit" not in item["sources"]
+    ]
+    candidate_skill_weight_map = {can: round(float(item["weight"]), 3) for can, item in merged.items()}
+    candidate_skill_sources = {
+        can: sorted(list(item["sources"]))
+        for can, item in merged.items()
+    }
+    domain_years = estimate_domain_experience(sections, max(experience_years_total, 0.1), skills_evidence)
+    experience_years_relevant = round(
+        sum(domain_years.get(d, 0.0) for d in ["data_analytics", "machine_learning", "nlp", "llm_genai", "data_engineering", "bi_reporting", "cloud_mlops_devops"]) / 7.0,
+        2,
+    )
+
+    return {
+        "experience_years_total": experience_years_total,
+        "experience_months_total": int(prof_months),
+        "experience_months_including_internship": int(total_months_from_ranges(merge_month_ranges([(s, e, 1.0) for s, e in (merged_prof + merged_intern)]))),
+        "experience_years_non_intern": non_intern_years,
+        "internship_months_estimated": int(internship_months_est),
+        "has_professional_experience": bool(non_intern_years >= 0.5),
+        "profile_experience_type": profile_experience_type,
+        "experience_years_relevant": experience_years_relevant,
+        "experience_years_relevant_by_domain": domain_years,
+        "inferred_seniority": inferred_seniority,
+        "seniority_confidence": float(round(seniority_conf, 2)),
+        "career_stage": career_stage,
+        "graduation_year": grad_year,
+        "years_since_graduation": years_since_graduation,
+        "highest_education_level": education_profile.get("highest_education_level", "none"),
+        "has_master_degree": bool(education_profile.get("has_master_degree", False)),
+        "has_phd_degree": bool(education_profile.get("has_phd_degree", False)),
+        "has_bachelor_degree": bool(education_profile.get("has_bachelor_degree", False)),
+        "has_data_related_master": bool(education_profile.get("has_data_related_master", False)),
+        "has_stem_background": bool(education_profile.get("has_stem_background", False)),
+        "master_focus_tags": education_profile.get("master_focus_tags", []),
+        "master_focus_primary": education_profile.get("master_focus_primary", "unknown"),
+        "education_data_relevance": float(education_profile.get("education_data_relevance", 0.0)),
+        "education_relevance_by_role": education_profile.get("education_relevance_by_role", {}),
+        "education_signal_confidence": float(education_profile.get("education_signal_confidence", 0.4)),
+        "first_experience_year": (_year_from_month_index(merged_prof[0][0])) if merged_prof else None,
+        "skills_detected_explicit": explicit_skills,
+        "skills_inferred_education": sorted({str(x.get("skill", "")).strip() for x in inferred_edu if str(x.get("skill", "")).strip()}),
+        "skills_inferred_experience": sorted({str(x.get("skill", "")).strip() for x in inferred_exp if str(x.get("skill", "")).strip()}),
+        "skills_inferred_semantic": sorted({str(x.get("skill", "")).strip() for x in inferred_semantic if str(x.get("skill", "")).strip()}),
+        "inferred_skills": inferred_skills,
+        "candidate_skill_weight_map": candidate_skill_weight_map,
+        "candidate_skill_sources": candidate_skill_sources,
+        "skills_detected": skills_detected,
+        "skills_evidence": skills_evidence,
+        "skills_evidence_confidence": skills_conf,
+        "semantic_inference_mode": semantic_mode,
+        "inference_confidence": float(round(min(0.95, 0.45 + 0.1 * bool(grad_year) + 0.2 * bool(merged_prof) + 0.25 * min(1.0, len(skills_detected) / 15.0)), 2)),
+    }
+
+
+def _env_flag(name: str, default: bool = False) -> bool:
+    val = str(os.getenv(name, "1" if default else "0") or "").strip().lower()
+    return val in {"1", "true", "yes", "y", "on"}
+
+
+def _call_openai_cv_parser_structured(resume_text: str) -> dict | None:
+    api_key = str(os.getenv("OPENAI_API_KEY", "") or "").strip()
+    if not api_key:
+        return None
+
+    model = str(os.getenv("CAIQ_LLM_MODEL", "gpt-4.1-mini") or "gpt-4.1-mini").strip()
+    timeout_s = float(os.getenv("CAIQ_LLM_TIMEOUT_S", "25") or "25")
+
+    system_prompt = (
+        "You are a strict CV parser for data-career guidance. "
+        "Return ONLY valid JSON following the schema. "
+        "Do not infer data-related master unless title/context clearly indicates data/AI/ML/analytics/computer science/statistics."
+    )
+    user_prompt = (
+        "Parse this CV text and classify education and profile signals.\n"
+        "CV_TEXT:\n" + str(resume_text or "")[:22000]
+    )
+
+    schema = {
+        "type": "object",
+        "properties": {
+            "highest_education_level": {"type": "string", "enum": ["none", "bachelor", "master", "phd"]},
+            "has_master_degree": {"type": "boolean"},
+            "has_data_related_master": {"type": "boolean"},
+            "education_data_relevance": {"type": "number", "minimum": 0, "maximum": 1},
+            "inferred_seniority": {"type": "string", "enum": ["student_intern", "junior", "mid_level", "senior", "lead_manager"]},
+            "skills_detected_additional": {"type": "array", "items": {"type": "string"}},
+            "skills_evidence_overrides": {
+                "type": "object",
+                "additionalProperties": {"type": "string", "enum": ["professional", "project", "academic", "declared"]}
+            },
+            "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+            "reason": {"type": "string"}
+        },
+        "required": [
+            "highest_education_level",
+            "has_master_degree",
+            "has_data_related_master",
+            "education_data_relevance",
+            "confidence"
+        ],
+        "additionalProperties": False
+    }
+
+    payload = {
+        "model": model,
+        "temperature": 0.0,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        "response_format": {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "cv_parser_output",
+                "strict": True,
+                "schema": schema,
+            },
+        },
+    }
+
+    try:
+        r = requests.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            json=payload,
+            timeout=timeout_s,
+        )
+        if r.status_code != 200:
+            return None
+        data = r.json()
+        content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+        if not content:
+            return None
+        parsed = json.loads(content)
+        if isinstance(parsed, dict):
+            return parsed
+    except Exception:
+        return None
+    return None
+
+
+def _sanitize_llm_profile(llm: dict, taxonomy: dict) -> dict:
+    out = {}
+    if not isinstance(llm, dict):
+        return out
+
+    lvl = str(llm.get("highest_education_level", "none") or "none").strip().lower()
+    if lvl in {"none", "bachelor", "master", "phd"}:
+        out["highest_education_level"] = lvl
+
+    if "has_master_degree" in llm:
+        out["has_master_degree"] = bool(llm.get("has_master_degree"))
+    if "has_data_related_master" in llm:
+        out["has_data_related_master"] = bool(llm.get("has_data_related_master"))
+
+    try:
+        rel = float(llm.get("education_data_relevance", 0.0))
+        out["education_data_relevance"] = float(max(0.0, min(1.0, rel)))
+    except Exception:
+        pass
+
+    sen = str(llm.get("inferred_seniority", "") or "").strip().lower()
+    if sen in {"student_intern", "junior", "mid_level", "senior", "lead_manager"}:
+        out["inferred_seniority"] = sen
+
+    add_sk = llm.get("skills_detected_additional", [])
+    if isinstance(add_sk, list):
+        valid = []
+        tax_keys = set(str(k) for k in taxonomy.keys())
+        for sk in add_sk:
+            s = str(sk or "").strip().lower()
+            if s in tax_keys:
+                valid.append(s)
+        out["skills_detected_additional"] = sorted(set(valid))
+
+    over = llm.get("skills_evidence_overrides", {})
+    if isinstance(over, dict):
+        clean = {}
+        tax_keys = set(str(k) for k in taxonomy.keys())
+        for k, v in over.items():
+            kk = str(k or "").strip().lower()
+            vv = str(v or "").strip().lower()
+            if kk in tax_keys and vv in {"professional", "project", "academic", "declared"}:
+                clean[kk] = vv
+        out["skills_evidence_overrides"] = clean
+
+    try:
+        out["confidence"] = float(max(0.0, min(1.0, float(llm.get("confidence", 0.0)))))
+    except Exception:
+        out["confidence"] = 0.0
+
+    out["reason"] = str(llm.get("reason", "") or "").strip()[:500]
+    return out
+
+
+def _merge_rule_and_llm_profile(rule_profile: dict, llm_profile: dict, target_taxonomy: dict) -> dict:
+    out = dict(rule_profile or {})
+    llm = _sanitize_llm_profile(llm_profile or {}, target_taxonomy or {})
+    llm_conf = float(llm.get("confidence", 0.0) or 0.0)
+
+    out["parser_mode"] = "hybrid"
+    out["llm_parser_used"] = bool(llm)
+    out["llm_parser_confidence"] = llm_conf
+    out["llm_parser_reason"] = str(llm.get("reason", "") or "")
+
+    if not llm:
+        out["parser_mode"] = "rule_based"
+        return out
+
+    # Validation disagreement tracking
+    disagreements = []
+    for k in ["has_master_degree", "has_data_related_master"]:
+        if k in llm and k in out and bool(llm[k]) != bool(out[k]):
+            disagreements.append(k)
+    out["llm_disagreements"] = disagreements
+
+    # Only override critical education fields with sufficient confidence
+    if llm_conf >= 0.70:
+        for k in ["highest_education_level", "has_master_degree", "has_data_related_master", "education_data_relevance"]:
+            if k in llm:
+                out[k] = llm[k]
+
+    # Merge additional skills conservatively
+    add_skills = set(llm.get("skills_detected_additional", []))
+    base_skills = set(str(s) for s in out.get("skills_detected", []))
+    merged_skills = sorted(base_skills | add_skills)
+    out["skills_detected"] = merged_skills
+
+    ev_map = dict(out.get("skills_evidence", {}) or {})
+    for sk, ev in (llm.get("skills_evidence_overrides", {}) or {}).items():
+        # only upgrade evidence if llm confidence is high
+        if llm_conf >= 0.75:
+            prev = str(ev_map.get(sk, "declared"))
+            order = {"declared": 0, "academic": 1, "project": 2, "professional": 3}
+            if order.get(ev, 0) >= order.get(prev, 0):
+                ev_map[sk] = ev
+    out["skills_evidence"] = ev_map
+
+    return out
+
+
+def build_candidate_profile_hybrid(resume_text: str, taxonomy: dict, use_llm: bool | None = None) -> dict:
+    base = build_candidate_profile_from_resume(resume_text, taxonomy)
+
+    if use_llm is None:
+        use_llm = _env_flag("CAIQ_USE_LLM_PARSER", default=False)
+
+    if not use_llm:
+        base["parser_mode"] = "rule_based"
+        base["llm_parser_used"] = False
+        return base
+
+    llm_raw = _call_openai_cv_parser_structured(resume_text)
+    merged = _merge_rule_and_llm_profile(base, llm_raw or {}, taxonomy)
+    return merged
+
+
+def _coerce_embedding_matrix(x):
+    try:
+        from scipy import sparse
+    except Exception:
+        sparse = None
+
+    if sparse is not None and sparse.issparse(x):
+        return x.astype(np.float32)
+
+    arr = np.asarray(x)
+    if arr.dtype != object:
+        return np.asarray(arr, dtype=np.float32)
+
+    # Streamlit caching / fancy indexing can turn sparse rows or dense vectors
+    # into dtype=object containers. Rebuild a proper numeric matrix first.
+    if arr.ndim == 1:
+        rows = list(arr)
+    else:
+        rows = [row for row in arr]
+
+    if sparse is not None and rows and all(sparse.issparse(r) for r in rows):
+        return sparse.vstack(rows).astype(np.float32)
+
+    dense_rows = [np.asarray(r, dtype=np.float32).ravel() for r in rows]
+    return np.vstack(dense_rows).astype(np.float32)
+
+
+def cosine_similarity_matrix(a, b):
+    a = _coerce_embedding_matrix(a)
+    b = _coerce_embedding_matrix(b)
+
+    try:
+        from scipy import sparse
+        from sklearn.metrics.pairwise import cosine_similarity
+
+        if sparse.issparse(a) or sparse.issparse(b):
+            return cosine_similarity(a, b)
+    except Exception:
+        pass
+
+    a_norm = a / (np.linalg.norm(a, axis=1, keepdims=True) + 1e-9)
+    b_norm = b / (np.linalg.norm(b, axis=1, keepdims=True) + 1e-9)
+    return a_norm @ b_norm.T
+
+
+# Cache global del modelo SentenceTransformer
+# Se carga UNA sola vez por proceso y se reutiliza en todas las llamadas
+_ST_MODEL_CACHE: dict = {}
+
+
+# Modelo multilingüe (soporta ES + EN). Más robusto para CVs en español.
+# Alternativa ligera en inglés: "all-MiniLM-L6-v2"
+_DEFAULT_EMBED_MODEL = os.getenv("CAIQ_EMBED_MODEL", "paraphrase-multilingual-MiniLM-L12-v2")
+
+
+def embed_texts(texts: list[str], model_name: str | None = None):
+    # Try sentence-transformers first, fallback to TF-IDF.
+    if model_name is None:
+        model_name = _DEFAULT_EMBED_MODEL
+    try:
+        from sentence_transformers import SentenceTransformer
+
+        # Usa el cache — no recarga el modelo si ya existe en memoria
+        if model_name not in _ST_MODEL_CACHE:
+            try:
+                _ST_MODEL_CACHE[model_name] = SentenceTransformer(
+                    model_name, local_files_only=True
+                )
+            except Exception:
+                _ST_MODEL_CACHE[model_name] = SentenceTransformer(model_name)
+
+        model = _ST_MODEL_CACHE[model_name]
+        emb = model.encode(
+            texts,
+            show_progress_bar=False,
+            convert_to_numpy=True,
+            normalize_embeddings=False,
+        )
+        return emb, "sentence-transformers"
+    except Exception:
+        from sklearn.feature_extraction.text import TfidfVectorizer
+
+        vec = TfidfVectorizer(max_features=40000, ngram_range=(1, 2))
+        mat = vec.fit_transform(texts)
+        return mat, "tfidf"
+
+
+def _semantic_role_fit(
+    skill_set: set[str],
+    target_role: str,
+    role_skills: list[str],
+    demand_counts: dict[str, float],
+) -> float:
+    if not skill_set or not role_skills:
+        return 0.0
+    ranked_role_skills = sorted(role_skills, key=lambda s: float(demand_counts.get(s, 0.0)), reverse=True)[:25]
+    candidate_txt = " ".join(sorted(skill_set))
+    role_txt = f"{target_role.replace('_', ' ')} " + " ".join(ranked_role_skills)
+    try:
+        emb, _ = embed_texts([candidate_txt, role_txt])
+        sim = float(cosine_similarity_matrix(emb[:1], emb[1:2]).ravel()[0])
+        return float(max(0.0, min(1.0, (sim + 1.0) / 2.0)))
+    except Exception:
+        return 0.0
+
+
+def _load_match_calibrator(calibration_path: str | Path | None = None) -> dict | None:
+    global _MATCH_CALIBRATOR_CACHE
+    if _MATCH_CALIBRATOR_CACHE is not None:
+        return _MATCH_CALIBRATOR_CACHE
+    if calibration_path is None:
+        calibration_path = Path(__file__).resolve().parents[1] / "reports" / "match_calibration.json"
+    p = Path(calibration_path)
+    if not p.exists():
+        _MATCH_CALIBRATOR_CACHE = None
+        return None
+    try:
+        obj = json.loads(p.read_text(encoding="utf-8"))
+        _MATCH_CALIBRATOR_CACHE = obj if isinstance(obj, dict) else None
+    except Exception:
+        _MATCH_CALIBRATOR_CACHE = None
+    return _MATCH_CALIBRATOR_CACHE
+
+
+def _apply_match_calibration(raw_score: float, target_role: str, calibrator: dict | None) -> float:
+    v = float(max(0.0, min(1.0, raw_score)))
+    if not calibrator or not bool(calibrator.get("enabled", False)):
+        return v
+    role_obj = ((calibrator.get("by_role", {}) or {}).get(target_role, {}) or {})
+    x = role_obj.get("x")
+    y = role_obj.get("y")
+    if (not x or not y) and bool(calibrator.get("apply_global", False)):
+        x = calibrator.get("x")
+        y = calibrator.get("y")
+    if not x or not y or len(x) < 2 or len(y) < 2:
+        return v
+    try:
+        xv = np.array(x, dtype=float)
+        yv = np.array(y, dtype=float)
+        if xv.size != yv.size or xv.size < 2:
+            return v
+        out = float(np.interp(v, xv, yv))
+        return float(max(0.0, min(1.0, out)))
+    except Exception:
+        return v
+
+
+def tokenize_words(text: str) -> set[str]:
+    return set(re.findall(r"[a-zA-Z]{3,}", norm_text(text).lower()))
+
+
+def build_master_rerank_features(
+    mdf: pd.DataFrame,
+    ms: pd.DataFrame,
+    gap_text: str,
+) -> pd.DataFrame:
+    feat = mdf.copy()
+    skill_count_map = ms.groupby("master_id")["skill"].nunique().to_dict()
+    feat["master_skill_count"] = feat["master_id"].map(skill_count_map).fillna(0).astype(float)
+    feat["price_missing"] = feat["price_value_eur"].isna().astype(int)
+    price_median = float(feat["price_value_eur"].dropna().median()) if feat["price_value_eur"].notna().any() else 0.0
+    feat["price_filled"] = feat["price_value_eur"].fillna(price_median).astype(float)
+    feat["study_len"] = feat["study_content"].fillna("").astype(str).str.len().astype(float)
+
+    q_tokens = tokenize_words(gap_text)
+
+    def lexical_overlap(text: str) -> float:
+        t = tokenize_words(text)
+        if not q_tokens or not t:
+            return 0.0
+        return len(q_tokens & t) / max(len(q_tokens), 1)
+
+    feat["lexical_overlap"] = feat["master_text"].fillna("").astype(str).map(lexical_overlap).astype(float)
+    feat["gap_ratio"] = feat["gap_coverage"] / np.maximum(feat["master_skill_count"], 1.0)
+    feat["gap_ratio"] = feat["gap_ratio"].replace([np.inf, -np.inf], 0.0).fillna(0.0)
+    return feat
+
+
+def try_load_reranker_model(model_path: str):
+    if not model_path:
+        return None
+    p = Path(model_path)
+    if not p.exists():
+        return None
+    try:
+        with p.open("rb") as f:
+            return pickle.load(f)
+    except Exception:
+        return None
+
+
+def build_candidate_skills_from_resume(resume_text: str, taxonomy: dict) -> set[str]:
+    profile = build_candidate_profile_from_resume(resume_text, taxonomy)
+    return set(profile.get("skills_detected", []))
+
+
+@functools.lru_cache(maxsize=16384)
+def _learning_level_signal(text: str) -> float:
+    low = _normalize_for_search(text)
+    beginner = any(k in low for k in ["beginner", "intro", "introduction", "fundamentals", "basics", "starter", "for beginners"])
+    advanced = any(k in low for k in ["advanced", "specialization", "expert", "professional", "masterclass", "hands-on project", "production"])
+    if beginner and not advanced:
+        return 0.25
+    if advanced and not beginner:
+        return 0.85
+    if beginner and advanced:
+        return 0.6
+    return 0.55
+
+
+def _desired_learning_level(candidate_profile: dict | None) -> float:
+    if not candidate_profile:
+        return 0.55
+    stage = str(candidate_profile.get("career_stage", "growth_stage"))
+    seniority = str(candidate_profile.get("inferred_seniority", "mid_level"))
+    if stage == "early_career" or seniority in {"student_intern", "junior"}:
+        return 0.4
+    if stage == "advanced_stage" or seniority in {"senior", "lead_manager"}:
+        return 0.75
+    return 0.58
+
+
+def _target_domain_gap_signal(target_role: str, candidate_profile: dict | None) -> float:
+    if not candidate_profile:
+        return 0.5
+    domains = candidate_profile.get("experience_years_relevant_by_domain", {})
+    role_domains = ROLE_DOMAIN_HINTS.get(target_role, set())
+    if not role_domains:
+        return 0.5
+    vals = [float(domains.get(d, 0.0)) for d in role_domains]
+    mean_exp = sum(vals) / max(len(vals), 1)
+    # Lower experience in role-critical domains -> stronger upskilling need.
+    return float(max(0.0, min(1.0, 1.0 - min(mean_exp, 6.0) / 6.0)))
+
+
+def _compute_role_skill_bands(
+    demand_df: pd.DataFrame,
+    top_n: int = 40,
+) -> tuple[dict[str, str], dict[str, float], list[str]]:
+    """
+    Build role-skill bands from market demand using frequency thresholds:
+    - core:      freq >= 0.35
+    - important: 0.15 <= freq < 0.35   (secondary)
+    - complementary: freq < 0.15       (support)
+
+    Returned demand weights are category weights:
+    core=2.0, important=1.0, complementary=0.5
+    """
+    if demand_df is None or demand_df.empty:
+        return {}, {}, []
+    d = demand_df.copy()
+    d = d.sort_values("demand_count", ascending=False).head(max(10, top_n)).copy()
+    skills = d["skill_norm"].astype(str).tolist()
+    n = len(skills)
+    if n == 0:
+        return {}, {}, []
+
+    bands = {}
+    if "demand_ratio" in d.columns:
+        d["freq"] = pd.to_numeric(d["demand_ratio"], errors="coerce").fillna(0.0).clip(0.0, 1.0)
+    else:
+        vmax = float(pd.to_numeric(d["demand_count"], errors="coerce").fillna(0.0).max() or 0.0)
+        if vmax > 0:
+            d["freq"] = (pd.to_numeric(d["demand_count"], errors="coerce").fillna(0.0) / vmax).clip(0.0, 1.0)
+        else:
+            d["freq"] = 0.0
+
+    for _, row in d.iterrows():
+        sk = str(row["skill_norm"])
+        f = float(row.get("freq", 0.0) or 0.0)
+        if f >= 0.35:
+            bands[sk] = "core"
+        elif f >= 0.15:
+            bands[sk] = "important"
+        else:
+            bands[sk] = "complementary"
+
+    # Fallback when absolute market frequencies are very low due sparse extraction.
+    # Reclassify using relative frequency scaling to preserve role separation.
+    if not any(v == "core" for v in bands.values()):
+        fmax = float(pd.to_numeric(d["freq"], errors="coerce").fillna(0.0).max() or 0.0)
+        if fmax > 0.0:
+            d["freq_rel"] = (pd.to_numeric(d["freq"], errors="coerce").fillna(0.0) / fmax).clip(0.0, 1.0)
+            for _, row in d.iterrows():
+                sk = str(row["skill_norm"])
+                fr = float(row.get("freq_rel", 0.0) or 0.0)
+                if fr >= 0.35:
+                    bands[sk] = "core"
+                elif fr >= 0.15:
+                    bands[sk] = "important"
+                else:
+                    bands[sk] = "complementary"
+
+    # Ensure minimum core density to avoid flat scores across roles.
+    core_count = sum(1 for v in bands.values() if v == "core")
+    if core_count == 0 and skills:
+        min_core = min(max(3, int(round(0.15 * len(skills)))), max(6, len(skills)))
+        for sk in skills[:min_core]:
+            bands[sk] = "core"
+
+    # Continuous demand weights: use actual demand_ratio instead of discrete 2/1/0.5.
+    # Bands (core/important/complementary) are kept for display and band-level metrics,
+    # but coverage scoring uses the real market gradient.
+    freq_map = dict(zip(d["skill_norm"].astype(str), d["freq"].astype(float))) if "freq" in d.columns else {}
+    demand_w = {}
+    for sk, band in bands.items():
+        dr = float(freq_map.get(sk, 0.0))
+        if dr > 0.0:
+            demand_w[sk] = max(0.1, min(2.0, dr * 2.0))
+        else:
+            # Fallback to discrete band weight when freq not available
+            if band == "core":
+                demand_w[sk] = 2.0
+            elif band == "important":
+                demand_w[sk] = 1.0
+            else:
+                demand_w[sk] = 0.5
+    return bands, demand_w, skills
+
+
+def _band_weight(band: str) -> float:
+    if band == "core":
+        return 2.0
+    if band == "important":
+        return 1.0
+    return 0.5
+
+
+def _band_rank(band: str) -> int:
+    if band == "core":
+        return 3
+    if band == "important":
+        return 2
+    return 1
+
+
+def _core_missing_penalty(core_cov: float, missing_core: int, core_total: int) -> float:
+    # Progressive penalty: strong core coverage should not be over-penalized
+    # by secondary misses.
+    if core_total <= 0:
+        return 1.0
+    if core_cov >= 0.60:
+        return 1.0
+    if missing_core >= 4:
+        return 0.82
+    if missing_core >= 2:
+        return 0.90
+    if missing_core == 1:
+        return 0.96
+    return 1.0
+
+
+def _derive_dynamic_combos(
+    target_skills: list[str],
+    role_bands: dict[str, str],
+    demand_counts: dict[str, float],
+) -> list[set[str]]:
+    # Build combos from market-ranked skills for the role.
+    if not target_skills:
+        return []
+    ranked = sorted(
+        target_skills,
+        key=lambda s: float(demand_counts.get(s, 0.0)),
+        reverse=True,
+    )
+    core_ranked = [s for s in ranked if role_bands.get(s) == "core"]
+    imp_ranked = [s for s in ranked if role_bands.get(s) == "important"]
+    combos: list[set[str]] = []
+    if len(core_ranked) >= 3:
+        combos.append(set(core_ranked[:3]))
+    if len(core_ranked) >= 2 and len(imp_ranked) >= 1:
+        combos.append(set(core_ranked[:2] + imp_ranked[:1]))
+    if len(core_ranked) >= 1 and len(imp_ranked) >= 2:
+        combos.append(set(core_ranked[:1] + imp_ranked[:2]))
+    if not combos and len(ranked) >= 3:
+        combos.append(set(ranked[:3]))
+    return combos
+
+
+def _coverage_by_band(
+    skill_set: set[str],
+    role_skills: list[str],
+    role_bands: dict[str, str],
+    demand_w: dict[str, float],
+) -> dict:
+    out = {}
+    for band in ["core", "important", "complementary", "optional"]:
+        band_skills = [s for s in role_skills if role_bands.get(s) == band]
+        denom = float(sum(float(demand_w.get(s, 1.0)) for s in band_skills))
+        numer = float(sum(float(demand_w.get(s, 1.0)) for s in band_skills if s in skill_set))
+        out[band] = float(numer / max(denom, 1.0))
+        out[f"{band}_missing"] = sorted([s for s in band_skills if s not in skill_set])
+        out[f"{band}_count"] = len(band_skills)
+    return out
+
+
+def _education_alignment_score(candidate_profile: dict | None, target_role: str) -> float:
+    profile = candidate_profile or {}
+    edu_rel = float((profile.get("education_relevance_by_role", {}) or {}).get(target_role, profile.get("education_data_relevance", 0.0)) or 0.0)
+    has_data_master = bool(profile.get("has_data_related_master", False))
+    has_master = bool(profile.get("has_master_degree", False))
+    if has_data_master:
+        return float(max(0.0, min(1.0, 0.75 + 0.25 * edu_rel)))
+    if has_master:
+        return float(max(0.0, min(1.0, 0.30 + 0.40 * edu_rel)))
+    return float(max(0.0, min(1.0, 0.10 + 0.50 * edu_rel)))
+
+
+def _experience_projects_score(candidate_profile: dict | None, target_role: str, role_skills: list[str]) -> float:
+    profile = candidate_profile or {}
+    domains = profile.get("experience_years_relevant_by_domain", {}) or {}
+    role_domains = ROLE_DOMAIN_HINTS.get(target_role, set())
+    role_domain_years = 0.0
+    if role_domains:
+        role_domain_years = sum(float(domains.get(d, 0.0)) for d in role_domains) / max(1, len(role_domains))
+    exp_signal = min(1.0, role_domain_years / 3.0)
+    evidence = {canonical_skill_name(k): str(v).strip().lower() for k, v in (profile.get("skills_evidence", {}) or {}).items()}
+    role_set = set(role_skills)
+    proj_or_prof = sum(1 for sk, ev in evidence.items() if sk in role_set and ev in {"professional", "project"})
+    ev_signal = min(1.0, proj_or_prof / 5.0)
+    return float(max(0.0, min(1.0, 0.65 * exp_signal + 0.35 * ev_signal)))
+
+
+def _combo_bonus(skill_set: set[str], target_role: str, combos_override: list[set[str]] | None = None) -> float:
+    combos = combos_override if combos_override is not None else ROLE_SKILL_COMBOS.get(target_role, [])
+    if not combos:
+        return 0.0
+    hit = 0.0
+    for c in combos:
+        cset = {canonical_skill_name(s) for s in c}
+        overlap = len(cset & skill_set) / max(len(cset), 1)
+        if overlap >= 1.0:
+            hit += 1.0
+        elif overlap >= 0.67:
+            hit += 0.55
+        elif overlap >= 0.50:
+            hit += 0.30
+    return float(max(0.0, min(1.0, hit / max(1, len(combos)))))
+
+
+def _seniority_target_from_text(text: str) -> int:
+    low = _normalize_for_search(text)
+    if any(k in low for k in ["intern", "trainee", "entry", "junior", "jr"]):
+        return 1
+    if any(k in low for k in ["lead", "principal", "head", "manager", "director"]):
+        return 4
+    if any(k in low for k in ["senior", "sr"]):
+        return 3
+    if any(k in low for k in ["mid", "intermediate"]):
+        return 2
+    return 2
+
+
+def _seniority_fit_score(user_seniority: str, target_seniority_txt: str) -> float:
+    u = SENIORITY_ORDER.get(user_seniority, 2)
+    t = _seniority_target_from_text(target_seniority_txt)
+    diff = abs(u - t)
+    return float(max(0.0, min(1.0, 1.0 - 0.23 * diff)))
+
+
+def select_courses_max_gap_coverage(
+    courses_scored: pd.DataFrame,
+    course_skills: pd.DataFrame,
+    remaining_gap: set[str],
+    skill_weight: dict[str, float] | None = None,
+    max_courses: int = 12,
+) -> pd.DataFrame:
+    """
+    Greedy set-cover style selector:
+    1) maximize newly covered gap skills
+    2) tie-break by course_score
+    3) keep structure of courses_scored rows unchanged
+    """
+    if courses_scored is None or courses_scored.empty:
+        return courses_scored
+    if not remaining_gap:
+        return courses_scored.sort_values("course_score", ascending=False).head(min(max_courses, len(courses_scored))).copy()
+
+    cs = course_skills.copy()
+    cs["skill"] = cs["skill"].astype(str)
+    cs["skill_norm"] = cs["skill"].map(canonical_skill_name)
+    cs = cs[cs["skill_norm"] != ""].copy()
+    cands = courses_scored.copy()
+    if "course_id" not in cands.columns:
+        return cands.sort_values("course_score", ascending=False).head(min(max_courses, len(cands))).copy()
+
+    course_skill_map = {}
+    for cid, g in cs.groupby("course_id"):
+        course_skill_map[cid] = set(g["skill_norm"].tolist())
+
+    cands["course_score"] = pd.to_numeric(cands.get("course_score"), errors="coerce").fillna(0.0)
+    cands = cands.sort_values("course_score", ascending=False).copy()
+
+    uncovered = set(remaining_gap)
+    weight_map = skill_weight or {}
+    selected_ids: set[str] = set()
+    selected_rows: list[dict] = []
+
+    # Convert to list of dicts once — 5-10x faster than repeated iterrows()
+    records = cands.to_dict("records")
+    # Keep a parallel index list so we can reconstruct DataFrame rows
+    orig_indices = list(cands.index)
+
+    remaining_records = list(zip(orig_indices, records))
+
+    for _ in range(min(max_courses, len(records))):
+        if not remaining_records:
+            break
+        best_pos = None
+        best_new_weight = -1.0
+        best_new = -1
+        best_score = -1.0
+
+        for pos, (_, rec) in enumerate(remaining_records):
+            cid = rec.get("course_id")
+            skills = course_skill_map.get(cid, set())
+            newly_skills = skills & uncovered
+            newly = len(newly_skills)
+            newly_weight = float(sum(float(weight_map.get(s, 1.0)) for s in newly_skills))
+            score = float(rec.get("course_score", 0.0) or 0.0)
+            if best_pos is None:
+                best_pos = pos
+                best_new = newly
+                best_score = score
+                best_new_weight = newly_weight
+                continue
+            if (
+                (newly_weight > best_new_weight + 1e-9)
+                or (abs(newly_weight - best_new_weight) <= 1e-9 and newly > best_new)
+                or (abs(newly_weight - best_new_weight) <= 1e-9 and newly == best_new and score > best_score)
+            ):
+                best_pos = pos
+                best_new = newly
+                best_score = score
+                best_new_weight = newly_weight
+
+        if best_pos is None:
+            break
+        _, best_rec = remaining_records.pop(best_pos)
+        cid = best_rec.get("course_id")
+        selected_ids.add(cid)
+        selected_rows.append(best_rec)
+        uncovered -= course_skill_map.get(cid, set())
+        if not uncovered:
+            break
+
+    selected_df = pd.DataFrame(selected_rows)
+    if len(selected_df) < max_courses:
+        remaining_df = cands[~cands["course_id"].isin(selected_ids)].head(max_courses - len(selected_df))
+        selected_df = pd.concat([selected_df, remaining_df], ignore_index=True)
+
+    return selected_df.head(max_courses).copy()
+
+
+# Module-level cache: keyed on (id(skills_df), id(features_df), id_col)
+# DataFrames loaded via @st.cache_data are the same object in memory across calls,
+# so id() is stable. This avoids re-running extract_skills on ~3000 items every call.
+_AUGMENT_CACHE: dict = {}
+
+
+def _augment_item_skills_with_taxonomy(
+    skills_df: pd.DataFrame,
+    features_df: pd.DataFrame,
+    id_col: str,
+    text_cols: list[str],
+    taxonomy: dict | None,
+) -> pd.DataFrame:
+    """
+    Keep original curated mappings and append inferred mappings from text
+    when taxonomy is available. This increases catalog coverage without
+    changing dataset structure on disk.
+
+    Results are cached in _AUGMENT_CACHE keyed on object identity so that
+    repeated calls with the same DataFrames (common in Streamlit sessions)
+    return instantly instead of re-running extract_skills on every item.
+    """
+    cache_key = (id(skills_df), id(features_df), id_col)
+    if cache_key in _AUGMENT_CACHE:
+        return _AUGMENT_CACHE[cache_key]
+
+    raw = skills_df.copy()
+    # Use ALL rows (including sentinels) to build the "already processed" set.
+    # Sentinel rows with skill=="__none__" mark items that were processed but
+    # had no taxonomy matches — they must be skipped to avoid re-running extract_skills.
+    all_ids_in_file = set(raw[id_col].dropna().tolist()) if id_col in raw.columns else set()
+    # Strip sentinels before building the clean base that will be returned.
+    if "skill" in raw.columns:
+        sentinel_vals = {"__none__", ""}
+        base = raw[~raw["skill"].fillna("").astype(str).isin(sentinel_vals)].copy()
+    else:
+        base = raw.copy()
+    if taxonomy is None or not isinstance(taxonomy, dict) or not len(taxonomy):
+        _AUGMENT_CACHE[cache_key] = base
+        return base
+    if id_col not in features_df.columns:
+        _AUGMENT_CACHE[cache_key] = base
+        return base
+
+    # existing_ids = all IDs that were already handled (including no-match sentinels)
+    existing_ids = all_ids_in_file
+    rows = []
+    view = features_df[[id_col] + [c for c in text_cols if c in features_df.columns]].copy()
+    view = view.dropna(subset=[id_col]).drop_duplicates(subset=[id_col])
+    # Use to_dict for faster iteration than iterrows
+    for rec in view.to_dict("records"):
+        item_id = rec.get(id_col)
+        if item_id in existing_ids:
+            continue
+        text = " ".join(str(rec.get(c, "") or "") for c in text_cols)
+        inferred = extract_skills(text, taxonomy)
+        for sk in inferred:
+            rows.append({id_col: item_id, "skill": sk})
+    if not rows:
+        _AUGMENT_CACHE[cache_key] = base
+        return base
+    add = pd.DataFrame(rows)
+    out = pd.concat([base, add], ignore_index=True)
+    # Remove sentinel rows used as "already processed" markers
+    if "skill" in out.columns:
+        out = out[out["skill"].fillna("").astype(str) != "__none__"]
+    out = out.drop_duplicates(subset=[id_col, "skill"])
+    _AUGMENT_CACHE[cache_key] = out
+    return out
+
+def detect_best_current_role(
+    candidate_profile: dict,
+    data: dict,
+    all_roles: list | None = None,
+) -> dict:
+    all_roles = all_roles or [
+        "ml_engineer",
+        "data_scientist",
+        "data_engineer",
+        "data_analyst",
+        "other_data_role",
+    ]
+    role_skill_demand = (data or {}).get("role_skill_demand")
+    if role_skill_demand is None or getattr(role_skill_demand, "empty", True):
+        return {
+            "detected_best_role": "",
+            "detected_best_role_score": 0,
+            "role_scores_all": {},
+        }
+
+    profile = candidate_profile or {}
+    explicit = profile.get("skills_detected_explicit", []) or []
+    detected = profile.get("skills_detected", []) or []
+    inferred = profile.get("inferred_skills", []) or []
+    candidate_skills_norm = {
+        canonical_skill_name(s)
+        for s in list(explicit) + list(detected) + list(inferred)
+        if canonical_skill_name(s)
+    }
+    if not candidate_skills_norm:
+        return {
+            "detected_best_role": "",
+            "detected_best_role_score": 0,
+            "role_scores_all": {role: 0 for role in all_roles},
+        }
+
+    role_scores_all = {}
+    for role in all_roles:
+        demand = role_skill_demand[role_skill_demand["role_family"].astype(str).str.lower() == str(role).lower()].copy()
+        if demand.empty:
+            role_scores_all[role] = 0
+            continue
+
+        demand["skill"] = demand["skill"].astype(str)
+        demand["skill_norm"] = demand["skill"].map(canonical_skill_name)
+        demand = demand[demand["skill_norm"] != ""].copy()
+        agg_cols = ["demand_count"]
+        if "demand_ratio" in demand.columns:
+            agg_cols.append("demand_ratio")
+        demand = demand.groupby(["skill_norm"], as_index=False)[agg_cols].max()
+        demand = demand.sort_values("demand_count", ascending=False)
+
+        role_bands, demand_w_market, target_skills_all = _compute_role_skill_bands(demand, top_n=40)
+        demand_counts = {}
+        for _, r in demand.iterrows():
+            sk = str(r.get("skill_norm", "")).strip()
+            if not sk:
+                continue
+            demand_counts[sk] = float(r.get("demand_count", 0.0) or 0.0)
+
+        skill_weight = {}
+        target_skills = list(target_skills_all)
+        if not target_skills:
+            target_skills = [str(s) for s in demand["skill_norm"].astype(str).head(40).tolist()]
+        target_skills = sorted(set([s for s in target_skills if s]))
+        for sk in target_skills:
+            skill_weight[sk] = _band_weight(role_bands.get(sk, "complementary"))
+
+        priors = ROLE_PRIOR_SKILLS.get(role, {})
+        prior_core = [canonical_skill_name(s) for s in priors.get("core", []) if canonical_skill_name(s)]
+        prior_important = [canonical_skill_name(s) for s in priors.get("important", []) if canonical_skill_name(s)]
+        market_core_count = sum(1 for s in target_skills if role_bands.get(s) == "core")
+        market_imp_count = sum(1 for s in target_skills if role_bands.get(s) == "important")
+        use_priors = not (
+            market_core_count >= MIN_MARKET_CORE_FOR_NO_PRIOR
+            and market_imp_count >= MIN_MARKET_IMPORTANT_FOR_NO_PRIOR
+        )
+        for sk in prior_core:
+            if not use_priors and sk not in target_skills:
+                continue
+            if use_priors and sk not in target_skills:
+                target_skills.append(sk)
+            prev = role_bands.get(sk, "complementary")
+            if _band_rank("core") >= _band_rank(prev):
+                role_bands[sk] = "core"
+            skill_weight[sk] = max(float(skill_weight.get(sk, 0.0)), 2.0)
+            demand_w_market[sk] = max(float(demand_w_market.get(sk, 0.0)), 2.0)
+        for sk in prior_important:
+            if not use_priors and sk not in target_skills:
+                continue
+            if use_priors and sk not in target_skills:
+                target_skills.append(sk)
+            prev = role_bands.get(sk, "complementary")
+            if _band_rank("important") >= _band_rank(prev):
+                role_bands[sk] = "important"
+            skill_weight[sk] = max(float(skill_weight.get(sk, 0.0)), 1.0)
+            demand_w_market[sk] = max(float(demand_w_market.get(sk, 0.0)), 1.0)
+
+        target_skills = sorted(set(target_skills))
+        target_set = set(target_skills)
+        if not target_set:
+            role_scores_all[role] = 0
+            continue
+
+        current_cov = _coverage_by_band(candidate_skills_norm, target_skills, role_bands, demand_w_market)
+        target_total_weight = float(sum(float(skill_weight.get(sk, 0.1)) for sk in target_set))
+        present_weight = float(sum(float(skill_weight.get(sk, 0.1)) for sk in (target_set & candidate_skills_norm)))
+        base_now = float(present_weight / max(target_total_weight, 1e-9))
+        core_missing_now = len(current_cov.get("core_missing", []) or [])
+        penalty_now = _core_missing_penalty(
+            core_cov=float(current_cov.get("core", 0.0)),
+            missing_core=core_missing_now,
+            core_total=int(current_cov.get("core_count", 0) or 0),
+        )
+        structural_now = (
+            float(MATCH_COMPONENT_WEIGHTS["weighted_presence"]) * base_now
+            + float(MATCH_COMPONENT_WEIGHTS["core_coverage"]) * float(current_cov.get("core", 0.0))
+            + float(MATCH_COMPONENT_WEIGHTS["important_coverage"]) * float(current_cov.get("important", 0.0))
+            + float(MATCH_COMPONENT_WEIGHTS["complementary_coverage"]) * float(current_cov.get("complementary", 0.0))
+        )
+        structural_now = structural_now / 0.90
+        score_pct = int(round(100.0 * max(0.0, min(1.0, structural_now * penalty_now))))
+        role_scores_all[role] = score_pct
+
+    for role in list(role_scores_all.keys()):
+        signatures = SIGNATURE_SKILLS.get(role, set())
+        if not signatures:
+            continue
+        has_signature = bool(candidate_skills_norm & signatures)
+        if not has_signature:
+            role_scores_all[role] = int(round(role_scores_all[role] * 0.4))
+
+    if role_scores_all:
+        max_score = max(role_scores_all.values())
+        if max_score > 0:
+            n_skills = len(profile.get("skills_detected_explicit", []) or [])
+            if n_skills <= 2:
+                max_cap = 35
+            elif n_skills <= 5:
+                max_cap = 55
+            elif n_skills <= 9:
+                max_cap = 72
+            else:
+                max_cap = 85
+            scale_factor = max_cap / max_score
+            scale_factor = min(scale_factor, 1.8)
+            role_scores_all = {
+                role: int(round(min(score * scale_factor, max_cap)))
+                for role, score in role_scores_all.items()
+            }
+
+    best_role = max(role_scores_all.items(), key=lambda kv: kv[1])[0] if role_scores_all else ""
+    best_score = int(role_scores_all.get(best_role, 0) or 0)
+    return {
+        "detected_best_role": best_role,
+        "detected_best_role_score": best_score,
+        "role_scores_all": role_scores_all,
+    }
+
+
+def recommend_learning_path(
+    candidate_skills: set[str],
+    target_role: str,
+    role_skill_demand: pd.DataFrame,
+    masters_feat: pd.DataFrame,
+    master_skills: pd.DataFrame,
+    courses_feat: pd.DataFrame,
+    course_skills: pd.DataFrame,
+    filters: dict,
+    weight_coverage: float = 0.65,
+    weight_semantic: float = 0.35,
+    master_reranker_model=None,
+    reranker_blend: float = 0.7,
+    candidate_profile: dict | None = None,
+    taxonomy: dict | None = None,
+    core_threshold: float = 0.15,
+    catalog_embeddings: dict | None = None,
+):
+    candidate_skills_norm = {canonical_skill_name(s) for s in (candidate_skills or set()) if canonical_skill_name(s)}
+    profile_skill_weights_raw = (candidate_profile or {}).get("candidate_skill_weight_map", {}) or {}
+    profile_skill_weights = {}
+    for k, v in profile_skill_weights_raw.items():
+        ck = canonical_skill_name(k)
+        if not ck:
+            continue
+        try:
+            profile_skill_weights[ck] = float(max(0.4, min(1.0, float(v))))
+        except Exception:
+            continue
+
+    def _cand_skill_weight(sk: str) -> float:
+        return float(profile_skill_weights.get(sk, 1.0))
+    demand = role_skill_demand[role_skill_demand["role_family"].str.lower() == target_role.lower()].copy()
+    if demand.empty:
+        demand = role_skill_demand.copy()
+
+    demand["skill"] = demand["skill"].astype(str)
+    demand["skill_norm"] = demand["skill"].map(canonical_skill_name)
+    demand = demand[demand["skill_norm"] != ""].copy()
+    agg_cols = ["demand_count"]
+    if "demand_ratio" in demand.columns:
+        agg_cols.append("demand_ratio")
+    demand = demand.groupby(["skill_norm"], as_index=False)[agg_cols].max()
+    demand = demand.sort_values("demand_count", ascending=False)
+    role_bands, demand_w_market, target_skills_all = _compute_role_skill_bands(demand, top_n=40)
+    demand_counts = {}
+    demand_ratios = {}
+    for _, r in demand.iterrows():
+        sk = str(r.get("skill_norm", "")).strip()
+        if not sk:
+            continue
+        demand_counts[sk] = float(r.get("demand_count", 0.0) or 0.0)
+        if "demand_ratio" in demand.columns:
+            demand_ratios[sk] = float(r.get("demand_ratio", 0.0) or 0.0)
+    # Market-driven skill weights by level:
+    # Weighted coverage: continuous demand_ratio instead of discrete bands (2.0/1.0/0.5).
+    # This captures the real market gradient — Python at 0.85 demand_ratio is not
+    # interchangeable with Tableau at 0.22, even if both are "core" band.
+    # Scale: demand_ratio in [0,1] → skill_weight in [0.1, 2.0] (preserves band range).
+    skill_weight = {}
+    target_skills = list(target_skills_all)
+    if "demand_ratio" in demand.columns:
+        core_skills = [str(r.get("skill_norm", "")).strip() for _, r in demand.iterrows() if float(r.get("demand_ratio", 0.0) or 0.0) >= float(core_threshold)]
+    else:
+        core_skills = []
+    # Use all role skills for matching, but prefer top-N to limit noise.
+    if not target_skills:
+        target_skills = [str(s) for s in demand["skill_norm"].astype(str).head(40).tolist()]
+    target_skills = [s for s in target_skills if s]
+    target_skills = sorted(set(target_skills))
+    for sk in target_skills:
+        dr = demand_ratios.get(sk, 0.0)
+        if dr > 0.0:
+            # Continuous weight: scale [0,1] demand_ratio → [0.1, 2.0]
+            skill_weight[sk] = max(0.1, min(2.0, dr * 2.0))
+        else:
+            # Fallback to discrete band weight when demand_ratio unavailable
+            skill_weight[sk] = _band_weight(role_bands.get(sk, "complementary"))
+
+    # Blend market demand with role priors only when market signal is sparse.
+    priors = ROLE_PRIOR_SKILLS.get(target_role, {})
+    prior_core = [canonical_skill_name(s) for s in priors.get("core", []) if canonical_skill_name(s)]
+    prior_important = [canonical_skill_name(s) for s in priors.get("important", []) if canonical_skill_name(s)]
+    market_core_count = sum(1 for s in target_skills if role_bands.get(s) == "core")
+    market_imp_count = sum(1 for s in target_skills if role_bands.get(s) == "important")
+    use_priors = not (
+        market_core_count >= MIN_MARKET_CORE_FOR_NO_PRIOR
+        and market_imp_count >= MIN_MARKET_IMPORTANT_FOR_NO_PRIOR
+    )
+    for sk in prior_core:
+        if not use_priors and sk not in target_skills:
+            continue
+        if use_priors and sk not in target_skills:
+            target_skills.append(sk)
+        prev = role_bands.get(sk, "complementary")
+        if _band_rank("core") >= _band_rank(prev):
+            role_bands[sk] = "core"
+        skill_weight[sk] = max(float(skill_weight.get(sk, 0.0)), 2.0)
+        demand_w_market[sk] = max(float(demand_w_market.get(sk, 0.0)), 2.0)
+    for sk in prior_important:
+        if not use_priors and sk not in target_skills:
+            continue
+        if use_priors and sk not in target_skills:
+            target_skills.append(sk)
+        prev = role_bands.get(sk, "complementary")
+        if _band_rank("important") >= _band_rank(prev):
+            role_bands[sk] = "important"
+        skill_weight[sk] = max(float(skill_weight.get(sk, 0.0)), 1.0)
+        demand_w_market[sk] = max(float(demand_w_market.get(sk, 0.0)), 1.0)
+    target_skills = sorted(set(target_skills))
+    target_set = set(target_skills)
+    dynamic_combos = _derive_dynamic_combos(target_skills, role_bands, demand_counts)
+
+    gap = sorted(
+        target_set - candidate_skills_norm,
+        key=lambda s: (-float(demand_ratios.get(s, 0.0)), -float(demand_counts.get(s, 0.0)), str(s)),
+    )
+    gap_set = set(gap)
+    target_total_weight = float(sum(float(skill_weight.get(sk, 0.1)) for sk in target_set))
+    present_weight = float(sum(float(skill_weight.get(sk, 0.1)) * _cand_skill_weight(sk) for sk in (target_set & candidate_skills_norm)))
+    role_match_ratio_weighted = float(present_weight / max(target_total_weight, 1.0))
+    current_cov = _coverage_by_band(candidate_skills_norm, target_skills, role_bands, demand_w_market)
+    missing_core_skills = current_cov.get("core_missing", []) or []
+    missing_important_skills = current_cov.get("important_missing", []) or []
+    role_fit = detect_best_current_role(
+        candidate_profile,
+        {"role_skill_demand": role_skill_demand},
+    )
+
+    # Apply filters
+    m = masters_feat.copy()
+    if filters.get("max_price") is not None:
+        m = m[(m["price_value_eur"].isna()) | (m["price_value_eur"] <= filters["max_price"])]
+    if filters.get("location"):
+        loc = filters["location"].lower()
+        m = m[m["location"].fillna("").str.lower().str.contains(loc, na=False)]
+    if filters.get("study_keyword"):
+        kw = filters["study_keyword"].lower()
+        m = m[m["study_content"].fillna("").str.lower().str.contains(kw, na=False)]
+
+    # Coverage score
+    ms = _augment_item_skills_with_taxonomy(
+        skills_df=master_skills,
+        features_df=masters_feat,
+        id_col="master_id",
+        text_cols=["program_name", "study_content", "master_text"],
+        taxonomy=taxonomy,
+    )
+    ms["skill"] = ms["skill"].astype(str)
+    ms["skill_norm"] = ms["skill"].map(canonical_skill_name)
+    ms = ms[ms["skill_norm"] != ""].copy()
+    master_cov = []
+    for mid, g in ms.groupby("master_id"):
+        sset = set(g["skill_norm"].tolist())
+        overlap = sset & gap_set
+        cov = len(overlap)
+        cov_w = float(sum(float(skill_weight.get(sk, 0.1)) for sk in overlap))
+        master_cov.append((mid, cov, cov_w, sset))
+    cov_df = pd.DataFrame(master_cov, columns=["master_id", "gap_coverage", "gap_coverage_weighted", "skill_set"])
+    m = m.merge(cov_df[["master_id", "gap_coverage", "gap_coverage_weighted"]], on="master_id", how="left").fillna({"gap_coverage": 0, "gap_coverage_weighted": 0.0})
+
+    # Semantic score for masters
+    gap_text = " ".join(gap) if gap else " ".join(target_skills)
+    m_texts = m["master_text"].fillna("").astype(str).tolist()
+    if m_texts:
+        cached_master_emb = None
+        emb_mode = "none"
+        master_vectorizer = None
+        if catalog_embeddings and "master_embeddings" in catalog_embeddings:
+            master_id_to_idx = catalog_embeddings.get("master_id_to_idx", {}) or {}
+            idxs = []
+            for mid in m["master_id"].tolist():
+                idx = master_id_to_idx.get(str(mid))
+                if idx is None:
+                    idxs = []
+                    break
+                idxs.append(idx)
+            if idxs:
+                cached_master_emb = catalog_embeddings["master_embeddings"][idxs]
+                emb_mode = str(catalog_embeddings.get("master_emb_mode", "cached") or "cached")
+                master_vectorizer = catalog_embeddings.get("master_vectorizer")
+        if cached_master_emb is not None:
+            if emb_mode == "tfidf" and master_vectorizer is not None:
+                gap_emb = master_vectorizer.transform([gap_text])
+            else:
+                gap_emb, _ = embed_texts([gap_text])
+            sim = cosine_similarity_matrix(gap_emb, cached_master_emb).ravel()
+            m["semantic_score"] = sim
+        else:
+            emb, emb_mode = embed_texts([gap_text] + m_texts)
+            sim = cosine_similarity_matrix(emb[:1], emb[1:]).ravel()
+            m["semantic_score"] = sim
+    else:
+        emb_mode = "none"
+        m["semantic_score"] = 0.0
+
+    max_cov = max(float(m["gap_coverage_weighted"].max()), 1.0) if len(m) else 1.0
+    m["coverage_score"] = m["gap_coverage_weighted"] / max_cov
+    m["master_score"] = weight_coverage * m["coverage_score"] + weight_semantic * m["semantic_score"]
+    if candidate_profile:
+        desired = _desired_learning_level(candidate_profile)
+        role_gap_need = _target_domain_gap_signal(target_role, candidate_profile)
+        m_level = m["program_name"].fillna("").astype(str) + " " + m["study_content"].fillna("").astype(str)
+        m["level_signal"] = m_level.map(_learning_level_signal).astype(float)
+        m["level_fit"] = 1.0 - (m["level_signal"] - desired).abs()
+        m["level_fit"] = m["level_fit"].clip(0.0, 1.0)
+        # If role-domain experience is low, prioritize stronger role-oriented masters.
+        m["master_score"] = 0.86 * m["master_score"] + 0.10 * m["level_fit"] + 0.04 * role_gap_need
+        # Avoid recommending a near-duplicate master when user already has a data-related one.
+        has_data_master = bool(candidate_profile.get("has_data_related_master", False))
+        candidate_master_focus = set(candidate_profile.get("master_focus_tags", []) or [])
+        role_focus = ROLE_PREFERRED_MASTER_FOCUS.get(target_role, {"data_science"})
+        m_text = (
+            m["program_name"].fillna("").astype(str)
+            + " "
+            + m["study_content"].fillna("").astype(str)
+            + " "
+            + m["master_text"].fillna("").astype(str)
+        )
+        m["program_focus_tags"] = m_text.map(infer_master_focus_tags)
+        m["program_focus_primary"] = m["program_focus_tags"].map(lambda tags: tags[0] if tags else "unknown")
+        m["program_role_focus_fit"] = m["program_focus_tags"].map(
+            lambda tags: 1.0 if (set(tags) & role_focus) else 0.0
+        ).astype(float)
+        if has_data_master and candidate_master_focus:
+            m["same_as_existing_master_focus"] = m["program_focus_tags"].map(
+                lambda tags: 1.0 if (set(tags) & candidate_master_focus) else 0.0
+            ).astype(float)
+            # Penalty for same-focus master, boost for role-fit but different focus.
+            m["master_score"] = (
+                m["master_score"].astype(float)
+                - 0.18 * m["same_as_existing_master_focus"].astype(float)
+                + 0.06 * ((1.0 - m["same_as_existing_master_focus"].astype(float)) * m["program_role_focus_fit"].astype(float))
+            )
+            m["master_score"] = m["master_score"].clip(lower=0.0, upper=1.0)
+
+    # Optional supervised reranking for masters.
+    m["reranker_score"] = np.nan
+    if master_reranker_model is not None and len(m):
+        feat = build_master_rerank_features(m, ms, gap_text)
+        cols = [
+            "coverage_score",
+            "semantic_score",
+            "gap_coverage",
+            "master_skill_count",
+            "price_missing",
+            "price_filled",
+            "study_len",
+            "lexical_overlap",
+            "gap_ratio",
+        ]
+        x = feat[cols].fillna(0.0).to_numpy()
+        try:
+            pred = master_reranker_model.predict(x)
+            pmin = float(np.min(pred))
+            pmax = float(np.max(pred))
+            if pmax > pmin:
+                pred = (pred - pmin) / (pmax - pmin)
+            else:
+                pred = np.zeros_like(pred)
+            m["reranker_score"] = pred
+            blend = min(max(float(reranker_blend), 0.0), 1.0)
+            m["master_score"] = (1.0 - blend) * m["master_score"] + blend * m["reranker_score"]
+        except Exception:
+            pass
+
+    m = m.sort_values("master_score", ascending=False)
+    top_masters = m.head(5).copy()
+    if candidate_profile and bool(candidate_profile.get("has_data_related_master", False)):
+        candidate_master_focus = set(candidate_profile.get("master_focus_tags", []) or [])
+        if candidate_master_focus and "program_focus_tags" in m.columns:
+            # Prefer non-redundant masters if there are enough alternatives.
+            non_redundant = m[
+                ~m["program_focus_tags"].map(lambda tags: bool(set(tags) & candidate_master_focus))
+            ].copy()
+            if len(non_redundant) >= 3:
+                top_masters = non_redundant.head(5).copy()
+            elif len(non_redundant) > 0:
+                head_non_redundant = non_redundant.head(3).copy()
+                remaining = m[~m["master_id"].astype(str).isin(set(head_non_redundant["master_id"].astype(str)))]
+                top_masters = pd.concat([head_non_redundant, remaining.head(max(0, 5 - len(head_non_redundant)))], ignore_index=True)
+
+    # Re-ranking by priority gaps
+    core_skills = set(
+        canonical_skill_name(s)
+        for s in (missing_core_skills or [])
+        if canonical_skill_name(s)
+    )
+    important_skills = set(
+        canonical_skill_name(s)
+        for s in (missing_important_skills or [])
+        if canonical_skill_name(s)
+    )
+
+    if core_skills or important_skills:
+        master_skill_map = {}
+        for mid, g in ms.groupby("master_id"):
+            master_skill_map[mid] = set(g["skill_norm"].tolist())
+
+        def _master_boost(row):
+            covered = master_skill_map.get(row.get("master_id", ""), set())
+            return (
+                len(covered & core_skills) * 3 +
+                len(covered & important_skills) * 1
+            )
+
+        master_ranked = m.copy()
+        master_ranked["_boost"] = master_ranked.apply(_master_boost, axis=1)
+        if int(pd.to_numeric(master_ranked["_boost"], errors="coerce").fillna(0).max()) > 0:
+            top_masters = master_ranked.sort_values(
+                ["_boost", "master_score"],
+                ascending=[False, False]
+            ).head(5).copy()
+        top_masters = top_masters.drop(columns=["_boost"], errors="ignore")
+
+    # Remaining gap after masters
+    covered_by_masters = set()
+    for mid in top_masters["master_id"].tolist():
+        s = ms.loc[ms["master_id"] == mid, "skill_norm"].astype(str).tolist()
+        covered_by_masters.update(s)
+    remaining_gap = sorted(
+        gap_set - covered_by_masters,
+        key=lambda s: (-float(demand_ratios.get(s, 0.0)), -float(demand_counts.get(s, 0.0)), str(s)),
+    )
+    rem_set = set(remaining_gap)
+
+    cs = _augment_item_skills_with_taxonomy(
+        skills_df=course_skills,
+        features_df=courses_feat,
+        id_col="course_id",
+        text_cols=["title", "course_text"],
+        taxonomy=taxonomy,
+    )
+    cs["skill"] = cs["skill"].astype(str)
+    cs["skill_norm"] = cs["skill"].map(canonical_skill_name)
+    cs = cs[cs["skill_norm"] != ""].copy()
+    course_cov = []
+    for cid, g in cs.groupby("course_id"):
+        sset = set(g["skill_norm"].tolist())
+        overlap = sset & rem_set
+        cov = len(overlap)
+        cov_w = float(sum(float(skill_weight.get(sk, 0.1)) for sk in overlap))
+        course_cov.append((cid, cov, cov_w))
+    c_cov_df = pd.DataFrame(course_cov, columns=["course_id", "remaining_gap_coverage", "remaining_gap_coverage_weighted"])
+
+    c = courses_feat.merge(c_cov_df, on="course_id", how="left").fillna({"remaining_gap_coverage": 0, "remaining_gap_coverage_weighted": 0.0})
+    c_texts = c["course_text"].fillna("").astype(str).tolist()
+    c_query = " ".join(remaining_gap) if remaining_gap else gap_text
+    if c_texts:
+        cached_course_emb = None
+        course_mode = "none"
+        course_vectorizer = None
+        if catalog_embeddings and "course_embeddings" in catalog_embeddings:
+            course_id_to_idx = catalog_embeddings.get("course_id_to_idx", {}) or {}
+            idxs = []
+            for cid in c["course_id"].tolist():
+                idx = course_id_to_idx.get(str(cid))
+                if idx is None:
+                    idxs = []
+                    break
+                idxs.append(idx)
+            if idxs:
+                cached_course_emb = catalog_embeddings["course_embeddings"][idxs]
+                course_mode = str(catalog_embeddings.get("course_emb_mode", "cached") or "cached")
+                course_vectorizer = catalog_embeddings.get("course_vectorizer")
+        if cached_course_emb is not None:
+            if course_mode == "tfidf" and course_vectorizer is not None:
+                q_emb = course_vectorizer.transform([c_query])
+            else:
+                q_emb, _ = embed_texts([c_query])
+            c_sim = cosine_similarity_matrix(q_emb, cached_course_emb).ravel()
+            c["semantic_score"] = c_sim
+        else:
+            c_emb, _ = embed_texts([c_query] + c_texts)
+            c_sim = cosine_similarity_matrix(c_emb[:1], c_emb[1:]).ravel()
+            c["semantic_score"] = c_sim
+    else:
+        c["semantic_score"] = 0.0
+
+    max_c_cov = max(float(c["remaining_gap_coverage_weighted"].max()), 1.0) if len(c) else 1.0
+    c["coverage_score"] = c["remaining_gap_coverage_weighted"] / max_c_cov
+    c["course_score"] = weight_coverage * c["coverage_score"] + weight_semantic * c["semantic_score"]
+    if candidate_profile:
+        desired = _desired_learning_level(candidate_profile)
+        role_gap_need = _target_domain_gap_signal(target_role, candidate_profile)
+        c_level_text = c["title"].fillna("").astype(str) + " " + c["course_text"].fillna("").astype(str)
+        c["level_signal"] = c_level_text.map(_learning_level_signal).astype(float)
+        c["level_fit"] = 1.0 - (c["level_signal"] - desired).abs()
+        c["level_fit"] = c["level_fit"].clip(0.0, 1.0)
+        # Stronger adaptation for courses to avoid over-basic suggestions for experienced profiles.
+        c["course_score"] = 0.82 * c["course_score"] + 0.12 * c["level_fit"] + 0.06 * role_gap_need
+    # Select courses prioritizing gap closure (set-cover), then quality score.
+    top_courses = select_courses_max_gap_coverage(
+        courses_scored=c,
+        course_skills=cs,
+        remaining_gap=rem_set,
+        skill_weight=skill_weight,
+        max_courses=12,
+    )
+
+    # Re-ranking by priority gaps
+    if core_skills or important_skills:
+        cmap = {}
+        for cid, g in cs.groupby("course_id"):
+            cmap[cid] = set(g["skill_norm"].tolist())
+
+        def _course_boost(row):
+            covered = cmap.get(row.get("course_id", ""), set())
+            core_topics_hit = {SKILL_TOPIC_MAP.get(s, s) for s in (covered & core_skills)}
+            important_topics_hit = {SKILL_TOPIC_MAP.get(s, s) for s in (covered & important_skills)}
+            return len(core_topics_hit) * 3 + len(important_topics_hit) * 1
+
+        course_ranked = c.copy()
+        course_ranked["_boost"] = course_ranked.apply(_course_boost, axis=1)
+        if int(pd.to_numeric(course_ranked["_boost"], errors="coerce").fillna(0).max()) > 0:
+            course_ranked = course_ranked.sort_values(
+                ["_boost", "course_score"],
+                ascending=[False, False]
+            ).copy()
+        else:
+            course_ranked = course_ranked.sort_values("course_score", ascending=False).copy()
+
+        priority_topics_ordered = []
+        seen_topics = set()
+        for skill in list(core_skills) + list(important_skills):
+            topic = SKILL_TOPIC_MAP.get(skill, skill)
+            if topic in seen_topics:
+                continue
+            seen_topics.add(topic)
+            priority_topics_ordered.append((topic, skill))
+
+        final_courses = []
+        used_course_ids = set()
+
+        # Pre-convert to dict-records once — 20-30x faster than iterrows()
+        course_ranked_records = course_ranked.to_dict("records")
+
+        # Paso 1: un mejor curso por cada topic prioritario.
+        for topic, skill in priority_topics_ordered:
+            candidates = [
+                rec for rec in course_ranked_records
+                if rec.get("course_id", "") not in used_course_ids
+                and topic in {
+                    SKILL_TOPIC_MAP.get(s, s)
+                    for s in cmap.get(rec.get("course_id", ""), set())
+                }
+            ]
+            if not candidates:
+                continue
+            best = max(
+                candidates,
+                key=lambda r: float(r.get("course_score", 0) or 0)
+            )
+            used_course_ids.add(best.get("course_id", ""))
+            final_courses.append(best)
+
+            # Límite del reranking por topic.
+            if len(final_courses) >= 4:
+                break
+
+        # Paso 2: set-cover greedy sobre gap_set completo.
+        # Ignora topics y maximiza skills nuevas del gap.
+        covered_by_step1 = set()
+        for fc in final_courses:
+            cid = fc.get("course_id", "")
+            covered_by_step1.update(cmap.get(cid, set()))
+
+        still_uncovered = gap_set - covered_by_step1
+
+        while len(final_courses) < 10 and still_uncovered:
+            best_cid = None
+            best_new = 0
+            best_score = -1.0
+            best_row = None
+
+            for rec in course_ranked_records:
+                cid = rec.get("course_id", "")
+                if cid in used_course_ids:
+                    continue
+
+                new_skills = cmap.get(cid, set()) & still_uncovered
+                n_new = len(new_skills)
+                score = float(rec.get("course_score", 0) or 0)
+
+                if (n_new > best_new) or (n_new == best_new and score > best_score):
+                    best_cid = cid
+                    best_new = n_new
+                    best_score = score
+                    best_row = rec
+
+            if best_cid is None or best_new == 0:
+                break
+
+            used_course_ids.add(best_cid)
+            final_courses.append(best_row)
+            still_uncovered -= cmap.get(best_cid, set())
+
+        # Si quedan slots y no hay más skills que cubrir,
+        # rellena con los mejores por score que queden.
+        if len(final_courses) < 10:
+            for rec in course_ranked_records:
+                if len(final_courses) >= 10:
+                    break
+                cid = rec.get("course_id", "")
+                if cid in used_course_ids:
+                    continue
+                used_course_ids.add(cid)
+                final_courses.append(rec)
+
+        if len(final_courses) >= 2:
+            top_courses = pd.DataFrame(final_courses).drop(
+                columns=["_boost"], errors="ignore"
+            )
+        else:
+            top_courses = course_ranked.head(10).drop(
+                columns=["_boost"], errors="ignore"
+            ).copy()
+
+    final_skill_set = set(candidate_skills)
+    final_skill_set = {canonical_skill_name(s) for s in final_skill_set if canonical_skill_name(s)}
+    for mid in top_masters["master_id"].tolist():
+        final_skill_set.update(ms.loc[ms["master_id"] == mid, "skill_norm"].astype(str).tolist())
+    for cid in top_courses["course_id"].tolist():
+        final_skill_set.update(cs.loc[cs["course_id"] == cid, "skill_norm"].astype(str).tolist())
+
+    # --- Text-presence fallback (conservative) ---
+    # Only mark a skill as covered if its exact canonical name appears literally
+    # in the title or program name of a recommended item — not in generic
+    # descriptions. This avoids the "scikit_learn covers machine_learning" overreach:
+    # a course must explicitly name the skill to count it.
+    _rec_titles: list[str] = []
+    for _, _mrow in top_masters.iterrows():
+        _rec_titles.append(str(_mrow.get("program_name", "") or "").lower())
+    for _, _crow in top_courses.iterrows():
+        _rec_titles.append(str(_crow.get("title", "") or "").lower())
+    _titles_text = " ".join(_rec_titles)
+    for _sk in list(set(target_skills) - final_skill_set):
+        _variants = [_sk.replace("_", " "), _sk]
+        if any(_v in _titles_text for _v in _variants):
+            final_skill_set.add(_sk)
+
+    remaining_after_full_path = sorted(
+        set(target_skills) - final_skill_set,
+        key=lambda s: (-float(demand_ratios.get(s, 0.0)), -float(demand_counts.get(s, 0.0)), str(s)),
+    )
+    initial_gap_count = len(gap_set)
+    remaining_gap_count = len(remaining_after_full_path)
+    closed_gap_count = max(0, initial_gap_count - remaining_gap_count)
+    initial_gap_weight = float(sum(float(skill_weight.get(sk, 0.1)) for sk in gap_set))
+    remaining_gap_weight = float(sum(float(skill_weight.get(sk, 0.1)) for sk in remaining_after_full_path))
+    closed_gap_weight = max(0.0, initial_gap_weight - remaining_gap_weight)
+    final_cov = _coverage_by_band(final_skill_set, target_skills, role_bands, demand_w_market)
+
+    edu_score = _education_alignment_score(candidate_profile, target_role) if candidate_profile else 0.0
+    exp_score = _experience_projects_score(candidate_profile, target_role, target_skills) if candidate_profile else 0.0
+    combo_now = _combo_bonus(candidate_skills_norm, target_role, combos_override=dynamic_combos)
+    combo_after = _combo_bonus(final_skill_set, target_role, combos_override=dynamic_combos)
+    semantic_now = _semantic_role_fit(candidate_skills_norm, target_role, target_skills, demand_counts)
+    semantic_after = _semantic_role_fit(final_skill_set, target_role, target_skills, demand_counts)
+
+    # Market-weighted match:
+    # match = sum(weights detected) / sum(weights role)
+    # + master bonus (data-related)
+    # + technical stack combo bonus
+    detected_weight_now = float(sum(float(skill_weight.get(sk, 0.5)) * _cand_skill_weight(sk) for sk in (target_set & candidate_skills_norm)))
+    detected_weight_after = float(sum(float(skill_weight.get(sk, 0.5)) for sk in (target_set & final_skill_set)))
+    base_now = float(detected_weight_now / max(target_total_weight, 1e-9))
+    base_after = float(detected_weight_after / max(target_total_weight, 1e-9))
+    structural_now = (
+        float(MATCH_COMPONENT_WEIGHTS["weighted_presence"]) * base_now
+        + float(MATCH_COMPONENT_WEIGHTS["core_coverage"]) * float(current_cov.get("core", 0.0))
+        + float(MATCH_COMPONENT_WEIGHTS["important_coverage"]) * float(current_cov.get("important", 0.0))
+        + float(MATCH_COMPONENT_WEIGHTS["complementary_coverage"]) * float(current_cov.get("complementary", 0.0))
+        + float(MATCH_COMPONENT_WEIGHTS["semantic_fit"]) * float(semantic_now)
+    )
+    structural_after = (
+        float(MATCH_COMPONENT_WEIGHTS["weighted_presence"]) * base_after
+        + float(MATCH_COMPONENT_WEIGHTS["core_coverage"]) * float(final_cov.get("core", 0.0))
+        + float(MATCH_COMPONENT_WEIGHTS["important_coverage"]) * float(final_cov.get("important", 0.0))
+        + float(MATCH_COMPONENT_WEIGHTS["complementary_coverage"]) * float(final_cov.get("complementary", 0.0))
+        + float(MATCH_COMPONENT_WEIGHTS["semantic_fit"]) * float(semantic_after)
+    )
+    data_master_bonus = 0.07 if bool((candidate_profile or {}).get("has_data_related_master", False)) else 0.0
+    combo_bonus_now = 0.05 if combo_now >= 0.67 else (0.03 if combo_now >= 0.5 else 0.0)
+    combo_bonus_after = 0.05 if combo_after >= 0.67 else (0.03 if combo_after >= 0.5 else 0.0)
+    core_missing_now = len(current_cov.get("core_missing", []) or [])
+    core_missing_after = len(final_cov.get("core_missing", []) or [])
+    penalty_now = _core_missing_penalty(
+        core_cov=float(current_cov.get("core", 0.0)),
+        missing_core=core_missing_now,
+        core_total=int(current_cov.get("core_count", 0) or 0),
+    )
+    penalty_after = _core_missing_penalty(
+        core_cov=float(final_cov.get("core", 0.0)),
+        missing_core=core_missing_after,
+        core_total=int(final_cov.get("core_count", 0) or 0),
+    )
+    skill_match_now = float(max(0.0, min(1.0, structural_now)))
+    skill_match_after = float(max(0.0, min(1.0, structural_after)))
+    match_now = (0.5 * skill_match_now + 0.3 * float(edu_score) + 0.2 * float(exp_score) + data_master_bonus + combo_bonus_now) * penalty_now
+    match_after = (0.5 * skill_match_after + 0.3 * float(edu_score) + 0.2 * float(exp_score) + data_master_bonus + combo_bonus_after) * penalty_after
+    calibrator = _load_match_calibrator()
+    match_now = _apply_match_calibration(match_now, target_role, calibrator)
+    match_after = _apply_match_calibration(match_after, target_role, calibrator)
+    has_stem = bool((candidate_profile or {}).get("has_stem_background", False))
+    has_data_master = bool((candidate_profile or {}).get("has_data_related_master", False))
+    if has_stem and has_data_master and target_role in {"data_analyst", "data_scientist", "data_engineer", "ml_engineer"}:
+        match_now = max(float(match_now), 0.45)
+        match_after = max(float(match_after), 0.55)
+    match_now = float(max(0.0, min(1.0, match_now)))
+    match_after = float(max(match_now, min(1.0, match_after)))
+
+    return {
+        "target_skills": target_skills,
+        "gap_skills": gap,
+        "gap_skills_market_priority": gap,
+        "remaining_gap": remaining_after_full_path,
+        "gap_coverage_ratio": (closed_gap_count / max(initial_gap_count, 1)),
+        "gap_coverage_ratio_weighted": (closed_gap_weight / max(initial_gap_weight, 1.0)),
+        "role_match_ratio_weighted": round(role_match_ratio_weighted, 3),
+        "role_core_coverage": round(float(current_cov.get("core", 0.0)), 3),
+        "role_important_coverage": round(float(current_cov.get("important", 0.0)), 3),
+        "role_complementary_coverage": round(float(current_cov.get("complementary", 0.0)), 3),
+        "role_optional_coverage": round(float(current_cov.get("optional", 0.0)), 3),
+        "role_core_coverage_after_path": round(float(final_cov.get("core", 0.0)), 3),
+        "role_important_coverage_after_path": round(float(final_cov.get("important", 0.0)), 3),
+        "role_complementary_coverage_after_path": round(float(final_cov.get("complementary", 0.0)), 3),
+        "role_optional_coverage_after_path": round(float(final_cov.get("optional", 0.0)), 3),
+        "missing_core_skills": current_cov.get("core_missing", []),
+        "missing_important_skills": current_cov.get("important_missing", []),
+        "missing_complementary_skills": current_cov.get("complementary_missing", []),
+        "role_match_score_current": round(100.0 * match_now, 1),
+        "role_match_score_after_path": round(100.0 * match_after, 1),
+        "education_alignment_score": round(float(edu_score), 3),
+        "experience_projects_score": round(float(exp_score), 3),
+        "skill_match_component_current": round(float(skill_match_now), 3),
+        "skill_match_component_after_path": round(float(skill_match_after), 3),
+        "combo_bonus_current": round(float(combo_now), 3),
+        "combo_bonus_after_path": round(float(combo_after), 3),
+        "semantic_fit_current": round(float(semantic_now), 3),
+        "semantic_fit_after_path": round(float(semantic_after), 3),
+        "target_demand_weight_total": round(target_total_weight, 3),
+        "target_demand_weight_present": round(present_weight, 3),
+        "gap_closed_count": closed_gap_count,
+        "gap_closed_weighted": round(closed_gap_weight, 3),
+        "gap_initial_count": initial_gap_count,
+        "gap_initial_weighted": round(initial_gap_weight, 3),
+        "inferred_skills": (candidate_profile or {}).get("inferred_skills", []),
+        "candidate_skill_sources": (candidate_profile or {}).get("candidate_skill_sources", {}),
+        "top_masters": top_masters,
+        "top_courses": top_courses,
+        "embedding_mode": emb_mode,
+        "reranker_used": master_reranker_model is not None,
+        "final_skill_set": final_skill_set,
+        "candidate_profile": candidate_profile or {},
+        "detected_best_role": role_fit.get("detected_best_role", ""),
+        "detected_best_role_score": int(role_fit.get("detected_best_role_score", 0) or 0),
+        "role_scores_all": role_fit.get("role_scores_all", {}),
+    }
+
+
+def filter_linkedin_spain_us_jobs(jobs: pd.DataFrame) -> pd.DataFrame:
+    """Keep the recommendation pool focused on recent LinkedIn markets requested by the app."""
+    if jobs is None or jobs.empty:
+        return jobs
+    out = jobs.copy()
+    if "site" in out.columns:
+        out = out[out["site"].fillna("").astype(str).str.lower().eq("linkedin")].copy()
+    if out.empty:
+        return out
+
+    location = out.get("location", pd.Series("", index=out.index)).fillna("").astype(str)
+    search_location = out.get("search_location", pd.Series("", index=out.index)).fillna("").astype(str)
+    market_text = (location + " " + search_location).str.lower()
+
+    spain_pattern = (
+        r"\b(?:spain|espana|españa|madrid|barcelona|catalonia|catalunya|valencia|valencian|"
+        r"andalusia|andalucia|sevilla|seville|bilbao|basque|malaga|málaga|zaragoza|"
+        r"alicante|murcia|galicia|pamplona|valladolid|granada|cordoba|córdoba|"
+        r"palma|santiago|community of madrid|gandia|gandía)\b"
+    )
+    us_pattern = (
+        r"\b(?:united states|usa|u\.s\.|new york|san francisco|seattle|austin|boston|"
+        r"chicago|los angeles|palo alto|santa clara|atlanta|dallas|houston|miami|"
+        r"washington|denver|phoenix|portland|philadelphia|raleigh|charlotte|"
+        r"basking ridge|manhattan|hunstville|huntsville)\b"
+        r"|,\s*(?:al|ak|az|ar|ca|co|ct|dc|de|fl|ga|hi|ia|id|il|in|ks|ky|la|ma|md|me|"
+        r"mi|mn|mo|ms|mt|nc|nd|ne|nh|nj|nm|nv|ny|oh|ok|or|pa|ri|sc|sd|tn|tx|ut|"
+        r"va|vt|wa|wi|wv|wy)\b"
+    )
+    market_mask = market_text.str.contains(spain_pattern, regex=True, na=False) | market_text.str.contains(us_pattern, regex=True, na=False)
+    return out[market_mask].copy()
+
+
+def recommend_jobs(
+    target_role: str,
+    final_skill_set: set[str],
+    jobs_feat: pd.DataFrame,
+    job_skills: pd.DataFrame,
+    candidate_profile: dict | None = None,
+):
+    final_skill_norm = {canonical_skill_name(s) for s in (final_skill_set or set()) if canonical_skill_name(s)}
+    jobs = filter_linkedin_spain_us_jobs(jobs_feat)
+    if "role_family" in jobs.columns:
+        filt = jobs["role_family"].fillna("").str.lower() == target_role.lower()
+        if filt.any():
+            jobs = jobs[filt].copy()
+
+    js = job_skills.copy()
+    js["skill"] = js["skill"].astype(str)
+    js["skill_norm"] = js["skill"].map(canonical_skill_name)
+    js = js[js["skill_norm"] != ""].copy()
+
+    user_seniority = str((candidate_profile or {}).get("inferred_seniority", "mid_level"))
+    domain_exp = (candidate_profile or {}).get("experience_years_relevant_by_domain", {})
+    role_domains = ROLE_DOMAIN_HINTS.get(target_role, set())
+    role_domain_mean = 0.0
+    if role_domains:
+        role_domain_mean = sum(float(domain_exp.get(d, 0.0)) for d in role_domains) / max(len(role_domains), 1)
+    role_domain_signal = max(0.0, min(1.0, min(role_domain_mean, 6.0) / 6.0))
+    edu_rel_map = (candidate_profile or {}).get("education_relevance_by_role", {}) or {}
+    education_signal = float(edu_rel_map.get(target_role, (candidate_profile or {}).get("education_data_relevance", 0.0)) or 0.0)
+    has_data_master = bool((candidate_profile or {}).get("has_data_related_master", False))
+
+    rec = []
+    for jid, grp in js.groupby("job_id"):
+        jskills = set(grp["skill_norm"].tolist())
+        if not jskills:
+            continue
+        overlap = len(jskills & final_skill_norm)
+        skill_score = overlap / max(len(jskills), 1)
+        rec.append((jid, overlap, len(jskills), skill_score))
+
+    rec_df = pd.DataFrame(rec, columns=["job_id", "skill_overlap", "job_skill_count", "skill_score"])
+    out = jobs.merge(rec_df, on="job_id", how="inner")
+    out["title_role_score"] = out["title"].fillna("").astype(str).map(lambda t: text_role_overlap_score(t, target_role) or 0.0)
+    user_level = SENIORITY_ORDER.get(user_seniority, 2)
+    if "seniority" in out.columns:
+        out["target_seniority_level"] = out["seniority"].fillna("").astype(str).map(_seniority_target_from_text).astype(int)
+        out["seniority_fit"] = out["seniority"].fillna("").astype(str).map(lambda s: _seniority_fit_score(user_seniority, s))
+    else:
+        out["target_seniority_level"] = 2
+        out["seniority_fit"] = 0.6
+    out["experience_fit"] = role_domain_signal
+    out["education_fit"] = education_signal
+    out["match_score"] = (
+        0.52 * out["skill_score"].astype(float)
+        + 0.20 * out["title_role_score"].astype(float)
+        + 0.12 * out["seniority_fit"].astype(float)
+        + 0.08 * out["experience_fit"].astype(float)
+        + 0.08 * out["education_fit"].astype(float)
+    )
+    if has_data_master and target_role in {"data_scientist", "ml_engineer", "data_engineer"}:
+        out["match_score"] = (out["match_score"].astype(float) + 0.03).clip(upper=1.0)
+    if "date_posted" in out.columns:
+        posted_dt = pd.to_datetime(out["date_posted"], errors="coerce", utc=False)
+        valid_dt = (
+            posted_dt.notna()
+            & (posted_dt >= pd.Timestamp(year=2025, month=1, day=1))
+        )
+        # Use dataset's most recent date as reference so recency is meaningful
+        # even for static/scraped datasets (avoids all scores being 0 after 30 days).
+        dataset_ref = posted_dt[valid_dt].max() if valid_dt.any() else pd.Timestamp.now()
+        age_days = (dataset_ref - posted_dt).dt.total_seconds() / 86400.0
+        # Window: 180 days gives good spread across the dataset
+        out["recency_score"] = 0.0
+        out.loc[valid_dt, "recency_score"] = (1.0 - (age_days[valid_dt] / 180.0)).clip(lower=0.0, upper=1.0)
+    else:
+        out["recency_score"] = 0.0
+    out["job_ranking_score"] = (
+        0.70 * out["match_score"].astype(float)
+        + 0.30 * out["recency_score"].astype(float)
+    ).clip(upper=1.0)
+    # Aspirational roles: notably above current seniority or with low seniority fit.
+    out["is_aspirational"] = (
+        (out["target_seniority_level"].astype(int) >= int(user_level) + 2)
+        | (out["seniority_fit"].astype(float) < 0.55)
+    )
+    out = out.sort_values(
+        ["is_aspirational", "job_ranking_score", "recency_score", "match_score", "skill_overlap"],
+        ascending=[True, False, False, False, False],
+    )
+    return out.head(35)
+
+
+def main():
+    p = argparse.ArgumentParser(description="CAIQ recommendation model: CV -> gap -> masters/courses -> jobs")
+    p.add_argument("--etl-dir", default=None)
+    p.add_argument("--taxonomy", default=None)
+    p.add_argument("--resume-text", default="", help="Resume/CV text")
+    p.add_argument("--resume-pdf", default="", help="Path to CV PDF")
+    p.add_argument("--target-role", default="ml_engineer", choices=["ml_engineer", "data_engineer", "data_scientist", "data_analyst", "other_data_role"])
+    p.add_argument("--max-price", type=float, default=None)
+    p.add_argument("--location", default="")
+    p.add_argument("--study-keyword", default="")
+    p.add_argument("--out-dir", default=None)
+    p.add_argument("--weight-coverage", type=float, default=0.6)
+    p.add_argument("--weight-semantic", type=float, default=0.4)
+    p.add_argument("--use-master-reranker", action="store_true")
+    p.add_argument("--master-reranker-path", default=None)
+    p.add_argument("--reranker-blend", type=float, default=0.7)
+    args = p.parse_args()
+
+    etl_dir = Path(args.etl_dir)
+    out_dir = Path(args.out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    taxonomy = load_taxonomy(Path(args.taxonomy))
+
+    resume_text = norm_text(args.resume_text)
+    if args.resume_pdf:
+        pdf_text = read_resume_pdf_text(Path(args.resume_pdf))
+        if pdf_text:
+            resume_text = pdf_text
+    if not resume_text:
+        raise ValueError("Provide --resume-text or --resume-pdf with readable content")
+
+    masters_feat = pd.read_csv(etl_dir / "outputs" / "semantic" / "masters_features.csv")
+    courses_feat = pd.read_csv(etl_dir / "outputs" / "semantic" / "courses_features.csv")
+    jobs_feat = pd.read_csv(etl_dir / "outputs" / "semantic" / "jobs_features.csv")
+    role_skill_demand = pd.read_csv(etl_dir / "outputs" / "semantic" / "role_skill_demand.csv")
+    master_skills = pd.read_csv(etl_dir / "outputs" / "curated" / "master_skills.csv")
+    course_skills = pd.read_csv(etl_dir / "outputs" / "curated" / "course_skills.csv")
+    job_skills = pd.read_csv(etl_dir / "outputs" / "curated" / "job_skills.csv")
+
+    candidate_profile = build_candidate_profile_hybrid(resume_text, taxonomy)
+    candidate_skills = set(candidate_profile.get("skills_detected", []))
+
+    master_reranker = try_load_reranker_model(args.master_reranker_path) if args.use_master_reranker else None
+
+    rec = recommend_learning_path(
+        candidate_skills=candidate_skills,
+        target_role=args.target_role,
+        role_skill_demand=role_skill_demand,
+        masters_feat=masters_feat,
+        master_skills=master_skills,
+        courses_feat=courses_feat,
+        course_skills=course_skills,
+        filters={"max_price": args.max_price, "location": args.location, "study_keyword": args.study_keyword},
+        weight_coverage=args.weight_coverage,
+        weight_semantic=args.weight_semantic,
+        master_reranker_model=master_reranker,
+        reranker_blend=args.reranker_blend,
+        candidate_profile=candidate_profile,
+        taxonomy=taxonomy,
+    )
+
+    jobs = recommend_jobs(args.target_role, rec["final_skill_set"], jobs_feat, job_skills, candidate_profile=candidate_profile)
+
+    rec["top_masters"].to_csv(out_dir / "recommended_masters.csv", index=False, encoding="utf-8")
+    rec["top_courses"].to_csv(out_dir / "recommended_courses.csv", index=False, encoding="utf-8")
+    jobs.to_csv(out_dir / "recommended_jobs.csv", index=False, encoding="utf-8")
+
+    summary = {
+        "target_role": args.target_role,
+        "embedding_mode": rec["embedding_mode"],
+        "recall_holdout": float(rec.get("recall_holdout", 0.0)),
+        "gap_reduction": float(rec.get("gap_reduction", 0.0)),
+        "coverage_score": float(rec.get("coverage_score", 0.0)),
+    }
+    (out_dir / "recommendation_summary.json").write_text(
+        json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
+    print(json.dumps(summary, indent=2))
+
+
+if __name__ == "__main__":
+    main()

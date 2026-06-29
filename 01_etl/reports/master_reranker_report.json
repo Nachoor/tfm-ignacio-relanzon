@@ -1,0 +1,30 @@
+{
+  "timestamp": "2026-03-07 19:04:07",
+  "n_candidates_total": 80,
+  "n_candidates_train": 64,
+  "n_candidates_test": 16,
+  "rows_trainset": 153811,
+  "rows_train": 121956,
+  "rows_test": 31855,
+  "features": [
+    "coverage_score",
+    "semantic_score",
+    "gap_coverage",
+    "master_skill_count",
+    "price_missing",
+    "price_filled",
+    "study_len",
+    "lexical_overlap",
+    "gap_ratio"
+  ],
+  "metrics": {
+    "rmse": 0.25722102215302983,
+    "mae": 0.2123063612551352,
+    "r2": 0.11934680335982994,
+    "avg_ndcg10": 0.5864539758582521
+  },
+  "artifacts": {
+    "model_path": "C:\\Users\\Nacho\\Documents\\TFM\\ETL\\outputs\\model\\master_reranker.pkl",
+    "trainset_path": "C:\\Users\\Nacho\\Documents\\TFM\\ETL\\outputs\\evaluation\\master_reranker_trainset.csv"
+  }
+}

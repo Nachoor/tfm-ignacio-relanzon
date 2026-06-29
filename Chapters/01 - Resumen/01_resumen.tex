@@ -1,0 +1,68 @@
+% ============================================================
+%  RESUMEN / ABSTRACT
+% ============================================================
+
+Este trabajo presenta CAIQ (\textit{Career Alignment and Insight Qualifier}), un
+sistema de recomendación profesional orientado a personas que se encuentran en proceso
+de transición hacia perfiles del sector de datos. El sistema toma como punto de
+partida el currículum vitae del candidato, extrae sus competencias, las contrasta con
+los requisitos reales de ofertas de empleo del rol objetivo y cuantifica la distancia
+existente. A partir de ese análisis, genera recomendaciones personalizadas de
+formación ---cursos y másteres--- y de empleo, ordenadas por su contribución al cierre
+de la brecha identificada.
+
+El sistema se articula en cuatro componentes. Un \textit{pipeline} de \textit{scraping}
+incremental mantiene actualizado un corpus de ofertas de empleo, cursos y programas de
+máster procedentes de portales especializados. Un módulo ETL normaliza y enriquece esos
+datos sobre una taxonomía controlada de competencias del sector. Un módulo de modelado
+del perfil extrae las competencias del CV, infiere el nivel de \textit{seniority} y
+calcula el \textit{skill gap} respecto al rol objetivo, estructurado en bandas de
+prioridad. Finalmente, un motor de recomendación híbrido combina coincidencia léxica y
+similitud semántica para ordenar los recursos más relevantes en cada caso.
+
+El trabajo cubre todo el ciclo: desde la recopilación y preprocesamiento de los datos
+hasta el despliegue de una aplicación web de acceso público, pasando por el diseño del
+motor de recomendación, su comparación entre distintas variantes de \textit{scoring} y
+su validación sobre casos de uso representativos. El resultado es un sistema funcional,
+validado y desplegado, que ofrece al profesional en transición una referencia objetiva
+sobre dónde está y qué necesita aprender.
+
+\vspace{0.4em}
+\noindent\textbf{Palabras clave:} sistemas de recomendación, \textit{skill gap},
+mercado laboral de datos, extracción de competencias, NLP, orientación profesional,
+\textit{scraping}, ETL.
+
+% ── Abstract (English) ───────────────────────────────────────────────────────
+\vspace{2em}
+\begin{otherlanguage*}{english}
+\section*{Abstract}
+\markboth{Abstract}{Abstract}
+\addcontentsline{toc}{section}{Abstract}
+
+This work presents CAIQ (\textit{Career Alignment and Insight Qualifier}), a
+professional recommendation system designed for people transitioning towards data roles.
+The system takes the candidate's CV as its starting point, extracts their competencies,
+contrasts them against the real requirements of job postings for the target role and
+quantifies the existing gap. From this analysis, it generates personalised
+recommendations for training ---courses and master's programmes--- and employment,
+ranked by their contribution to closing the identified gap.
+
+The system is built around four components. An incremental scraping pipeline keeps a
+corpus of job postings, online courses and master's programmes up to date from
+specialised portals. An ETL module normalises and enriches these data against a
+controlled competency taxonomy for the data sector. A profile modelling module extracts
+competencies from the CV, infers the candidate's seniority level and computes the skill
+gap with respect to the target role, structured in priority bands. A hybrid
+recommendation engine then combines lexical matching and semantic similarity to rank
+the most relevant resources for each candidate.
+
+The work covers the full cycle: from data collection and preprocessing through
+recommendation engine design, multi-variant scoring comparison and validation on
+representative use cases, to the deployment of a publicly accessible web application.
+The outcome is a functional, validated and deployed system that gives the transitioning
+professional an objective reference for where they stand and what they need to learn.
+
+\vspace{0.4em}
+\noindent\textbf{Keywords:} recommender systems, skill gap, data job market, skill
+extraction, NLP, career guidance, web scraping, ETL.
+\end{otherlanguage*}

@@ -1,0 +1,59 @@
+# ============================================================
+#  CAIQ – .gitignore
+# ============================================================
+
+# --- DATOS PERSONALES (nunca subir) ---
+04_validacion/casos_cv/
+
+# --- DATOS SCRAPEADOS Y PROCESADOS (volumen + no código) ---
+scrappings/
+_historico/
+01_etl/outputs/
+03_aplicacion/outputs/
+**/outputs/
+02_modelo/artefactos/recommended_*.csv
+02_modelo/artefactos/recommendation_summary.json
+job_url_status.csv
+
+# --- MODELOS BINARIOS (regenerables con los pipelines) ---
+02_modelo/artefactos/*.pkl
+01_etl/reports/model_*.pkl
+
+# --- LOGS ---
+logs/
+*.log
+
+# --- PYTHON ---
+__pycache__/
+*.py[cod]
+*.pyo
+.Python
+*.egg-info/
+dist/
+build/
+.env
+.venv/
+venv/
+
+# --- DOCUMENTOS WORD (borradores TFM, no código) ---
+*.docx
+~$*.docx
+*.tmp
+~WRL*.tmp
+
+# --- LATEX (salida compilada) ---
+*.aux
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.synctex.gz
+*.toc
+*.pdf
+
+# --- SISTEMA ---
+.DS_Store
+Thumbs.db
+desktop.ini

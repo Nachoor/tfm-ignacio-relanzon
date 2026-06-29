@@ -1,0 +1,14 @@
+cv_file,target_role,y_true,y_pred,abs_error,skills_count,stage
+CV - Alba Sanchez.pdf,data_scientist,0.315,0.327,0.01200000000000001,7,base
+CV - Alejandro Ã_lvarez VÃ¡zquez.pdf,data_scientist,0.696,0.40700000000000003,0.2889999999999999,10,ready
+CV - Cristina Sanjuan .pdf,data_scientist,0.067,0.081,0.013999999999999999,2,no_base
+CV _Maria Gonzalez.pdf,data_scientist,0.051,0.188,0.137,6,no_base
+CV-Diego_Aguilar.pdf,data_scientist,0.857,0.7290000000000001,0.1279999999999999,22,ready
+CV_Ana Valverde.pdf,data_scientist,0.334,0.281,0.05299999999999999,7,base
+CV_Carlota Palao.pdf,data_scientist,0.07,0.12300000000000001,0.053000000000000005,1,no_base
+CV_Carmen Galán.pdf,data_scientist,0.0,0.025,0.025,0,no_base
+CV_Gabriel Rezola.pdf,data_scientist,0.332,0.282,0.050000000000000044,12,base
+CV_Ignacio Relanzon.pdf,data_scientist,0.841,0.7190000000000001,0.12199999999999989,19,ready
+CV_IÑIGO_MARTINEZ.pdf,data_scientist,0.867,0.76,0.10699999999999998,20,ready
+CV_Maria_Rodriguez.pdf,data_scientist,0.704,0.7979999999999999,0.09399999999999997,17,ready
+CV_Paulo_Gonzalez_ES.pdf,data_scientist,1.0,0.495,0.505,17,ready

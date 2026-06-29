@@ -1,0 +1,86 @@
+% ============================================================
+%  CAPÍTULO 6 – CONCLUSIONES Y TRABAJO FUTURO
+% ============================================================
+
+\subsection{Conclusiones}
+\label{subsec:conclusiones}
+
+Este trabajo ha desarrollado CAIQ (\textit{Career Alignment and Insight Qualifier}),
+un sistema de recomendación profesional orientado a personas en transición hacia el
+mercado laboral de datos. El sistema toma como entrada el currículum vitae del candidato,
+cuantifica su brecha de competencias respecto a un rol objetivo y genera recomendaciones
+ordenadas de formación y empleo. El resultado cubre el ciclo completo de un proyecto de
+datos: desde la adquisición y preprocesamiento de fuentes heterogéneas hasta el despliegue
+de una aplicación web de acceso público con actualización automática semanal del corpus
+subyacente.
+
+\textbf{Cobertura de los objetivos.} Los cinco objetivos específicos planteados quedan
+cubiertos con evidencia cuantitativa. El sistema dispone de tres \textit{datasets}
+estructurados y enriquecidos (37.829 ofertas de empleo, 89.332 cursos y 3.503 másteres)
+mantenidos mediante un \textit{pipeline} incremental con deduplicación, caducidad
+temporal y verificación activa de URLs. El motor de recomendación ha sido comparado en
+cuatro variantes mediante ablación sobre $n$\,=\,482 candidatos y validado tanto
+cuantitativamente como sobre casos de uso representativos. La aplicación está desplegada
+y operativa en Hugging Face Spaces. El detalle de los resultados y su interpretación
+crítica se ha desarrollado en los capítulos anteriores.
+
+\textbf{Contribuciones principales.} El trabajo aporta tres contribuciones con valor
+propio más allá de los objetivos. En primer lugar, una \textbf{taxonomía controlada de
+71 competencias del sector de datos} con 477 alias léxicos, construida sobre análisis
+empírico de ofertas reales, reutilizable como recurso independiente para otros sistemas
+de análisis de mercado laboral. En segundo lugar, un \textbf{motor de recomendación
+híbrido sin dependencia de historial de interacciones}: al no requerir datos previos de
+uso, el sistema ofrece recomendaciones desde la primera consulta, eliminando el problema
+de arranque en frío que limita los sistemas de filtrado colaborativo. En tercer lugar,
+un \textbf{\textit{pipeline} de adquisición y mantenimiento incremental} que combina
+scraping multi-fuente, verificación activa de URLs con caché persistente y caducidad
+configurable, reproducible en producción con infraestructura mínima.
+
+\subsection{Trabajo Futuro}
+\label{subsec:trabajo_futuro}
+
+Los resultados obtenidos y las limitaciones identificadas permiten trazar líneas de
+trabajo concretas que ampliarían la capacidad y el alcance del sistema.
+
+\textbf{Mejora de la cobertura del catálogo de cursos.} La limitación más directa sobre
+la calidad de las recomendaciones formativas es la baja cobertura de competencias en los
+cursos (15,7\,\%), consecuencia de disponer solo del título como fuente textual. La
+prioridad inmediata es enriquecer el catálogo con descripciones de contenido y
+\textit{syllabi} obtenidos de las APIs o páginas de cada plataforma. Esta mejora no
+requiere cambios arquitectónicos y tendría impacto directo en la precisión del ranking
+formativo.
+
+\textbf{Extracción de competencias con modelos preentrenados.} La taxonomía léxica
+actual ofrece cobertura casi total pero precisión moderada. Una vez disponible
+infraestructura de inferencia con GPU, sustituir o complementar el extractor actual con
+modelos especializados en vocabulario de empleo --- como ESCOXLM-R (Zhang et al., 2023),
+preentrenado sobre la taxonomía ESCO --- permitiría reducir los falsos positivos sin
+sacrificar cobertura.
+
+\textbf{Incorporación de \textit{feedback} implícito del usuario.} El sistema genera
+recomendaciones sin memoria de sesiones anteriores. Registrar las interacciones del
+usuario (cursos consultados, ofertas guardadas) como señal de relevancia implícita
+permitiría recalibrar los pesos del motor de forma continua, añadiendo una capa de
+personalización basada en comportamiento real sin necesidad de valoraciones explícitas.
+
+\textbf{Expansión y mantenimiento dinámico de la taxonomía.} La taxonomía de 71
+competencias cubre el mercado actual del sector de datos, pero el vocabulario técnico
+evoluciona con rapidez. Definir un proceso de revisión periódica anclado en el análisis
+automático de términos emergentes en las ofertas scrapeadas --- identificando denominaciones
+frecuentes no mapeadas --- permitiría mantener la taxonomía alineada con la demanda real
+sin intervención manual intensiva.
+
+\textbf{Evaluación con usuarios reales.} La validación del sistema se ha realizado sobre
+CVs reales pero sin interacción directa de candidatos con la aplicación. Un estudio con
+profesionales en transición que utilizasen CAIQ durante un período definido permitiría
+medir la utilidad percibida, la relevancia subjetiva de las recomendaciones y el impacto
+sobre las decisiones de formación, complementando la evidencia cuantitativa con la
+perspectiva del usuario final.
+
+\textbf{Adaptación a entornos organizacionales.} Las aplicaciones identificadas en la
+discusión --- servicios de orientación universitaria y departamentos de recursos humanos ---
+requieren extender el sistema con gestión de usuarios, soporte para análisis colectivos
+(\textit{team gap analysis}) y exportación de informes estructurados. El núcleo analítico
+actual podría actuar como motor de estas extensiones sin necesidad de rediseño.
+
+En conjunto, CAIQ demuestra que es posible construir un sistema de orientación profesional basado en datos reales del mercado ---funcional, validado y desplegado--- con infraestructura accesible y sin dependencia de modelos de lenguaje de gran escala. El profesional en transición dispone así de una referencia objetiva sobre su punto de partida y de los pasos concretos que puede dar para cerrar la brecha que le separa del rol al que aspira.

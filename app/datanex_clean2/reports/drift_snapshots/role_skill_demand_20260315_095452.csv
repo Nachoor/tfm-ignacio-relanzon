@@ -1,0 +1,33 @@
+role_family,skill,demand_count,role_job_count,demand_ratio
+data_analyst,data analysis,112,1052,0.1064638783269961
+data_analyst,data engineering,13,1052,0.0123574144486692
+data_analyst,power bi,12,1052,0.0114068441064638
+data_analyst,generative ai,5,1052,0.0047528517110266
+data_analyst,java,4,1052,0.0038022813688212
+data_analyst,machine learning,4,1052,0.0038022813688212
+data_analyst,python,4,1052,0.0038022813688212
+data_analyst,statistics,4,1052,0.0038022813688212
+data_analyst,aws,2,1052,0.0019011406844106
+data_analyst,azure,2,1052,0.0019011406844106
+data_analyst,sql,2,1052,0.0019011406844106
+data_analyst,tableau,2,1052,0.0019011406844106
+data_analyst,databricks,1,1052,0.0009505703422053
+data_analyst,forecasting,1,1052,0.0009505703422053
+data_engineer,data engineering,54,57,0.9473684210526316
+data_engineer,azure,1,57,0.0175438596491228
+data_engineer,data analysis,1,57,0.0175438596491228
+data_engineer,databricks,1,57,0.0175438596491228
+data_engineer,java,1,57,0.0175438596491228
+data_engineer,machine learning,1,57,0.0175438596491228
+data_engineer,microsoft fabric,1,57,0.0175438596491228
+data_engineer,python,1,57,0.0175438596491228
+data_engineer,scala,1,57,0.0175438596491228
+data_scientist,data analysis,3,54,0.0555555555555555
+data_scientist,generative ai,2,54,0.037037037037037
+data_scientist,llm,2,54,0.037037037037037
+data_scientist,machine learning,1,54,0.0185185185185185
+data_scientist,statistics,1,54,0.0185185185185185
+ml_engineer,machine learning,2,5,0.4
+ml_engineer,data analysis,1,5,0.2
+ml_engineer,deep learning,1,5,0.2
+ml_engineer,llm,1,5,0.2

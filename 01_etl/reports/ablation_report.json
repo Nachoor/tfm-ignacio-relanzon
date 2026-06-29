@@ -1,0 +1,16 @@
+{
+  "timestamp": "2026-03-07 18:44:13",
+  "n_candidates": 30,
+  "best_variant": {
+    "variant": "hybrid_tuned",
+    "weight_coverage": 0.65,
+    "weight_semantic": 0.35,
+    "avg_recall": 0.9333333333333333,
+    "avg_gap_reduction": 0.7176021170138817,
+    "objective": 0.8470408468055526,
+    "n": 15
+  },
+  "baseline_objective": 0.8446707509648685,
+  "relative_lift_vs_coverage_only": 0.002805940466124434,
+  "results_path": "C:\\Users\\Nacho\\Documents\\TFM\\ETL\\outputs\\evaluation\\ablation_results.csv"
+}

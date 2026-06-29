@@ -1,0 +1,132 @@
+% ============================================================
+%  ANEXOS
+% ============================================================
+
+% -----------------------------------------------------------
+\subsection*{Anexo A: Acceso a la aplicación web}
+\label{anexo:aplicacion}
+\addcontentsline{toc}{subsection}{Anexo A: Acceso a la aplicación web}
+% -----------------------------------------------------------
+
+El sistema CAIQ está desplegado como aplicación web de acceso público en Hugging Face
+Spaces. La aplicación puede consultarse en la siguiente URL:
+
+\begin{center}
+  \url{https://huggingface.co/spaces/relan02/caiq}
+\end{center}
+
+No se requiere registro ni autenticación. El único requisito es disponer de un currículum
+vitae en formato PDF, DOCX o TXT. El corpus de ofertas de empleo subyacente se actualiza
+automáticamente cada semana mediante el \textit{pipeline} descrito en la
+Sección~\ref{subsec:pipeline_scraping}.
+
+La aplicación se organiza en tres vistas principales accesibles desde el menú lateral:
+la vista de \textbf{resumen del perfil} (competencias detectadas, nivel de
+\textit{seniority} y distribución del \textit{skill gap} por banda de prioridad), la
+vista de \textbf{recomendaciones} (cursos, másteres y ofertas ordenados por su
+contribución al cierre de la brecha) y la vista de \textbf{inteligencia de
+\textit{skills}} (demanda de competencias en el mercado filtrable por familia de rol).
+Las capturas de estas tres vistas se presentan en las Figuras~13--15 del
+capítulo de Resultados.
+
+% -----------------------------------------------------------
+\subsection*{Anexo B: Estructura del código fuente}
+\label{anexo:codigo}
+\addcontentsline{toc}{subsection}{Anexo B: Estructura del código fuente}
+% -----------------------------------------------------------
+
+El código fuente del sistema se organiza en cuatro módulos que corresponden a las capas
+funcionales descritas en la Sección~\ref{subsec:arquitectura_general_del_sistema}.
+
+\textbf{Pipeline de \textit{scraping} e ingesta} (\texttt{actualizar\_ofertas.py}).
+Script principal de actualización del corpus. Implementa el flujo completo: scraping
+multi-fuente mediante \texttt{JobSpy}, deduplicación por URL, fusión incremental con el
+histórico, caducidad temporal configurable y verificación activa de URLs con caché
+persistente (\texttt{job\_url\_status.csv}). Se invoca semanalmente de forma automática
+mediante la tarea programada definida en \texttt{setup\_tarea\_programada.ps1} (todos
+los lunes a las 08:00).
+
+\textbf{Pipeline ETL y capa semántica} (\texttt{01\_etl/pipelines/}). Conjunto de
+scripts numerados que implementan el proceso de transformación y enriquecimiento:
+limpieza y normalización (\texttt{01\_etl\_curated\_layer.py}), generación de
+\textit{embeddings} y tabla \texttt{role\_skill\_demand}
+(\texttt{02\_build\_semantic\_features.py}), entrenamiento y calibración del motor de
+recomendación (\texttt{03\_train\_and\_tune\_recommender.py}), evaluación cuantitativa
+(\texttt{04\_evaluate\_recommender\_metrics.py}) y estudio de ablación de variantes
+(\texttt{05\_ablation\_study\_recommender.py}).
+
+\textbf{Aplicación web} (\texttt{app/datanex\_clean2/}). Contiene el código de la
+interfaz \texttt{Streamlit}: \texttt{datanex\_app.py} (módulo principal),
+\texttt{config/skills\_taxonomy.json} (taxonomía controlada de 71 competencias con 477
+alias léxicos), \texttt{Dockerfile} (imagen de despliegue) y \texttt{requirements.txt}
+(dependencias de producción).
+
+\textbf{Validación} (\texttt{04\_validacion/}). Scripts de validación cuantitativa sobre
+el corpus de 500 CVs: extracción de competencias, comparación contra anotación manual
+($n$\,=\,87) y generación de las métricas de precisión, \textit{recall} y F1 reportadas
+en la Sección~\ref{subsec:resultados_obj4}.
+
+% -----------------------------------------------------------
+\subsection*{Anexo C: Taxonomía de competencias}
+\label{anexo:taxonomia}
+\addcontentsline{toc}{subsection}{Anexo C: Taxonomía de competencias}
+% -----------------------------------------------------------
+
+La Tabla~\ref{tab:taxonomia_completa} recoge las 71 competencias que componen la
+taxonomía controlada del sistema, con el número de alias léxicos definidos para cada una.
+Los alias permiten reconocer la misma competencia bajo las distintas denominaciones
+habituales en el mercado laboral (por ejemplo, \texttt{sql} incluye variantes como
+\textit{MySQL}, \textit{PostgreSQL}, \textit{T-SQL} o \textit{PL/SQL}).
+
+\begin{table}[H]
+  \caption{Taxonomía de competencias del sistema CAIQ: 71 competencias canónicas y
+  número de alias léxicos.}
+  \label{tab:taxonomia_completa}
+  \centering
+  \footnotesize
+  \begin{tabular}{|p{4.0cm}|c||p{4.0cm}|c|}
+    \hline
+    \rowcolor{gray!15}
+    \textbf{Competencia} & \textbf{Alias} & \textbf{Competencia} & \textbf{Alias} \\
+    \hline
+    a/b testing         &  3 & lightgbm           &  3 \\
+    airflow             &  5 & linux              &  9 \\
+    api                 &  8 & llm                & 10 \\
+    aws                 & 11 & looker             &  4 \\
+    azure               &  9 & machine learning   & 17 \\
+    big data            &  3 & mapreduce          &  3 \\
+    business intelligence &  8 & mathematics      & 11 \\
+    c++                 &  3 & microsoft fabric   &  4 \\
+    ci/cd               &  9 & mlflow             &  6 \\
+    computer vision     & 10 & mlops              & 11 \\
+    dask                &  4 & nlp                & 14 \\
+    data analysis       &  4 & nosql              &  9 \\
+    data engineering    &  3 & numpy              &  4 \\
+    data science        &  3 & pandas             &  3 \\
+    data visualization  & 16 & power bi           &  4 \\
+    data governance     &  8 & python             &  4 \\
+    databricks          &  5 & pytorch            &  3 \\
+    dbt                 &  4 & r                  & 14 \\
+    deep learning       & 17 & redshift           &  3 \\
+    docker              &  7 & sas                &  5 \\
+    elasticsearch       &  7 & scala              &  4 \\
+    etl                 &  6 & scikit-learn       &  5 \\
+    excel               &  8 & snowflake          &  3 \\
+    fastapi             &  8 & spark              &  6 \\
+    feature engineering &  5 & spss               &  4 \\
+    forecasting         &  4 & sql                & 18 \\
+    gcp                 & 10 & statistics         & 16 \\
+    generative ai       & 17 & tableau            &  6 \\
+    git                 &  7 & talend             &  3 \\
+    hadoop              &  3 & tensorflow         &  4 \\
+    hdfs                &  3 & terraform          &  6 \\
+    hive                &  4 & time series        &  9 \\
+    informatica         &  4 & xgboost            &  3 \\
+    java                &  4 & yarn               &  3 \\
+    kafka               &  7 & keras              &  4 \\
+    kubernetes          &  5 & & \\
+    \hline
+    \multicolumn{4}{|r|}{\textbf{Total: 71 competencias — 477 alias}} \\
+    \hline
+  \end{tabular}
+\end{table}

@@ -1,0 +1,76 @@
+<style>
+.tfm-wrap{font-family:var(--font-sans);padding:4px 0 10px}
+.tfm-table{width:100%;border-collapse:collapse;font-size:11px}
+.tfm-table th{background:#2E4057;color:#fff;font-weight:500;font-size:10.5px;padding:8px 12px;text-align:left;border:0.5px solid #1e2d3d}
+.tfm-table td{padding:6px 12px;vertical-align:middle;border:0.5px solid var(--color-border-tertiary);color:var(--color-text-primary);line-height:1.5;font-family:var(--font-sans)}
+.tfm-table tr:nth-child(even) td{background:var(--color-background-secondary)}
+.tfm-table tr:nth-child(odd) td{background:var(--color-background-primary)}
+.tfm-caption{font-size:10.5px;color:var(--color-text-secondary);margin:6px 0 0;font-style:italic;line-height:1.5}
+.tag{display:inline-block;font-size:9.5px;font-weight:500;border-radius:3px;padding:2px 7px;font-family:var(--font-sans);white-space:nowrap}
+.t-si{background:#E6F1FB;color:#0C447C}
+.t-ju{background:#EAF3DE;color:#27500A}
+.t-mi{background:#FAEEDA;color:#633806}
+.t-se{background:#EEEDFE;color:#3C3489}
+.t-le{background:#FAECE7;color:#712B13}
+.sep{font-size:9.5px;color:var(--color-text-tertiary);font-style:italic}
+.code{font-family:var(--font-mono);font-size:10px}
+</style>
+<div class="tfm-wrap">
+<table class="tfm-table">
+<thead>
+<tr>
+<th style="width:20%">Prioridad</th>
+<th style="width:52%">Condición</th>
+<th style="width:28%">Salida</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><span class="sep">Señal léxica</span></td>
+<td><span class="code">intern / trainee / student</span> + exp &lt; 1,5 años</td>
+<td><span class="tag t-si">student_intern</span></td>
+</tr>
+<tr>
+<td><span class="sep">Señal léxica</span></td>
+<td><span class="code">lead / principal / manager / director</span> + exp ≥ 6 años</td>
+<td><span class="tag t-le">lead_manager</span></td>
+</tr>
+<tr>
+<td><span class="sep">Señal léxica</span></td>
+<td><span class="code">senior / sr.</span> + exp ≥ 4 años</td>
+<td><span class="tag t-se">senior</span></td>
+</tr>
+<tr>
+<td><span class="sep">Señal léxica</span></td>
+<td><span class="code">junior / jr.</span></td>
+<td><span class="tag t-ju">junior</span></td>
+</tr>
+<tr>
+<td><span class="sep">Umbral</span></td>
+<td>exp &lt; 1 año</td>
+<td><span class="tag t-si">student_intern</span></td>
+</tr>
+<tr>
+<td><span class="sep">Umbral</span></td>
+<td>1 ≤ exp &lt; 2,5 años</td>
+<td><span class="tag t-ju">junior</span></td>
+</tr>
+<tr>
+<td><span class="sep">Umbral</span></td>
+<td>2,5 ≤ exp &lt; 5,5 años</td>
+<td><span class="tag t-mi">mid_level</span></td>
+</tr>
+<tr>
+<td><span class="sep">Umbral</span></td>
+<td>5,5 ≤ exp &lt; 8,5 años</td>
+<td><span class="tag t-se">senior</span></td>
+</tr>
+<tr>
+<td><span class="sep">Umbral</span></td>
+<td>exp ≥ 8,5 años</td>
+<td><span class="tag t-le">lead_manager</span></td>
+</tr>
+</tbody>
+</table>
+<p class="tfm-caption">Tabla X. Reglas de inferencia de seniority. Las señales léxicas tienen prioridad sobre los umbrales numéricos. Cada clasificación incluye además una confianza asociada: mayor cuando existe señal textual explícita, menor cuando la inferencia se basa únicamente en duración.</p>
+</div>

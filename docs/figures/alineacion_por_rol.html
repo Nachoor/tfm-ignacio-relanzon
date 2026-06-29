@@ -1,0 +1,34 @@
+<style>
+.bar-wrap{padding:4px 0 8px;font-family:var(--font-sans)}
+.bar-row{display:flex;align-items:center;margin-bottom:8px;gap:10px}
+.bar-label{font-size:11px;color:var(--color-text-secondary);width:160px;text-align:right;flex-shrink:0}
+.bar-track{flex:1;background:var(--color-background-secondary);border-radius:3px;height:20px;position:relative}
+.bar-fill{height:20px;border-radius:3px;display:flex;align-items:center;padding-left:8px;transition:width .3s}
+.bar-val{font-size:10.5px;font-weight:500;color:#fff}
+.best-label{font-size:9.5px;font-weight:500;background:#EAF3DE;color:#27500A;border-radius:3px;padding:1px 6px;margin-left:6px;flex-shrink:0}
+.cap{font-size:10.5px;color:var(--color-text-secondary);font-style:italic;margin-top:8px;line-height:1.5}
+</style>
+<div class="bar-wrap">
+<div class="bar-row">
+  <span class="bar-label">data_analyst</span>
+  <div class="bar-track"><div class="bar-fill" style="width:79%;background:#185FA5"><span class="bar-val">0.79</span></div></div>
+  <span class="best-label">detected_best_role</span>
+</div>
+<div class="bar-row">
+  <span class="bar-label">data_scientist</span>
+  <div class="bar-track"><div class="bar-fill" style="width:54%;background:#534AB7"><span class="bar-val">0.54</span></div></div>
+</div>
+<div class="bar-row">
+  <span class="bar-label">ml_engineer</span>
+  <div class="bar-track"><div class="bar-fill" style="width:38%;background:#534AB7"><span class="bar-val">0.38</span></div></div>
+</div>
+<div class="bar-row">
+  <span class="bar-label">data_engineer</span>
+  <div class="bar-track"><div class="bar-fill" style="width:28%;background:#0F6E56"><span class="bar-val">0.28</span></div></div>
+</div>
+<div class="bar-row">
+  <span class="bar-label">other_data_role</span>
+  <div class="bar-track"><div class="bar-fill" style="width:18%;background:#5F5E5A"><span class="bar-val">0.18</span></div></div>
+</div>
+<p class="cap">Figura X. Puntuaciones de alineación por familia de rol sobre un perfil ilustrativo. El rol con mayor puntuación queda almacenado como <em>detected_best_role</em>. Esta variable no sustituye al rol objetivo seleccionado por el usuario, sino que permite comparar la situación actual con la aspiración profesional y ajustar la magnitud del gap calculado.</p>
+</div>

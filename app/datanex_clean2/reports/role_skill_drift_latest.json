@@ -1,0 +1,210 @@
+{
+  "timestamp": "20260416_193509",
+  "status": "ok",
+  "current_snapshot": "C:\\Users\\Nacho\\Documents\\TFM\\app\\datanex_clean2\\reports\\drift_snapshots\\role_skill_demand_20260416_193509.csv",
+  "previous_snapshot": "C:\\Users\\Nacho\\Documents\\TFM\\app\\datanex_clean2\\reports\\drift_snapshots\\role_skill_demand_20260316_103131.csv",
+  "global_mean_abs_delta": 0.003665,
+  "role_drift": [
+    {
+      "role_family": "data_analyst",
+      "mean_abs_delta": 0.000760855380176724,
+      "p90_abs_delta": 0.0012755942128462997,
+      "skills_changed_gt_0_02": 0
+    },
+    {
+      "role_family": "data_engineer",
+      "mean_abs_delta": 0.0011933539788660347,
+      "p90_abs_delta": 0.0015436997468317119,
+      "skills_changed_gt_0_02": 1
+    },
+    {
+      "role_family": "data_scientist",
+      "mean_abs_delta": 0.012117807439965421,
+      "p90_abs_delta": 0.004704529759085599,
+      "skills_changed_gt_0_02": 1
+    },
+    {
+      "role_family": "ml_engineer",
+      "mean_abs_delta": 0.0012049363937465254,
+      "p90_abs_delta": 0.0023330954596058003,
+      "skills_changed_gt_0_02": 0
+    }
+  ],
+  "top_skill_changes": [
+    {
+      "role_family": "data_scientist",
+      "skill": "data science",
+      "demand_ratio_prev": 0.0,
+      "demand_ratio_cur": 0.4015910898965791,
+      "abs_delta": 0.4015910898965791
+    },
+    {
+      "role_family": "data_engineer",
+      "skill": "data engineering",
+      "demand_ratio_prev": 0.3258088005825444,
+      "demand_ratio_cur": 0.3036954087346025,
+      "abs_delta": 0.02211339184794192
+    },
+    {
+      "role_family": "ml_engineer",
+      "skill": "data science",
+      "demand_ratio_prev": 0.0,
+      "demand_ratio_cur": 0.0141027299780049,
+      "abs_delta": 0.0141027299780049
+    },
+    {
+      "role_family": "ml_engineer",
+      "skill": "machine learning",
+      "demand_ratio_prev": 0.265751211631664,
+      "demand_ratio_cur": 0.2749385431491784,
+      "abs_delta": 0.009187331517514441
+    },
+    {
+      "role_family": "data_analyst",
+      "skill": "data analysis",
+      "demand_ratio_prev": 0.0864839634593585,
+      "demand_ratio_cur": 0.0772977219167321,
+      "abs_delta": 0.0091862415426264
+    },
+    {
+      "role_family": "data_analyst",
+      "skill": "data science",
+      "demand_ratio_prev": 0.0,
+      "demand_ratio_cur": 0.007541241162608,
+      "abs_delta": 0.007541241162608
+    },
+    {
+      "role_family": "data_scientist",
+      "skill": "sql",
+      "demand_ratio_prev": 0.0048857594481965,
+      "demand_ratio_cur": 0.0120922832140015,
+      "abs_delta": 0.0072065237658049995
+    },
+    {
+      "role_family": "data_engineer",
+      "skill": "big data",
+      "demand_ratio_prev": 0.0,
+      "demand_ratio_cur": 0.0067189249720044,
+      "abs_delta": 0.0067189249720044
+    },
+    {
+      "role_family": "data_engineer",
+      "skill": "data science",
+      "demand_ratio_prev": 0.0,
+      "demand_ratio_cur": 0.0066069428891377,
+      "abs_delta": 0.0066069428891377
+    },
+    {
+      "role_family": "data_scientist",
+      "skill": "python",
+      "demand_ratio_prev": 0.0119270010058916,
+      "demand_ratio_cur": 0.0175019888623707,
+      "abs_delta": 0.0055749878564790994
+    },
+    {
+      "role_family": "data_scientist",
+      "skill": "machine learning",
+      "demand_ratio_prev": 0.0409541600804713,
+      "demand_ratio_cur": 0.0458233890214797,
+      "abs_delta": 0.004869228941008399
+    },
+    {
+      "role_family": "data_scientist",
+      "skill": "data analysis",
+      "demand_ratio_prev": 0.0304641471475786,
+      "demand_ratio_cur": 0.0350039777247414,
+      "abs_delta": 0.004539830577162798
+    },
+    {
+      "role_family": "data_scientist",
+      "skill": "generative ai",
+      "demand_ratio_prev": 0.0192556401781865,
+      "demand_ratio_cur": 0.014956245027844,
+      "abs_delta": 0.004299395150342502
+    },
+    {
+      "role_family": "data_analyst",
+      "skill": "power bi",
+      "demand_ratio_prev": 0.0142028405681136,
+      "demand_ratio_cur": 0.010840534171249,
+      "abs_delta": 0.003362306396864601
+    },
+    {
+      "role_family": "ml_engineer",
+      "skill": "generative ai",
+      "demand_ratio_prev": 0.0357719824601892,
+      "demand_ratio_cur": 0.0382973217751326,
+      "abs_delta": 0.002525339314943399
+    },
+    {
+      "role_family": "ml_engineer",
+      "skill": "aws",
+      "demand_ratio_prev": 0.0144241864758827,
+      "demand_ratio_cur": 0.0120326044766463,
+      "abs_delta": 0.0023915819992364005
+    },
+    {
+      "role_family": "ml_engineer",
+      "skill": "llm",
+      "demand_ratio_prev": 0.0103854142626355,
+      "demand_ratio_cur": 0.0126795186958209,
+      "abs_delta": 0.0022941044331854007
+    },
+    {
+      "role_family": "data_analyst",
+      "skill": "data engineering",
+      "demand_ratio_prev": 0.007668200306728,
+      "demand_ratio_cur": 0.0058130400628436,
+      "abs_delta": 0.0018551602438843994
+    },
+    {
+      "role_family": "data_engineer",
+      "skill": "data analysis",
+      "demand_ratio_prev": 0.0242380110267346,
+      "demand_ratio_cur": 0.022508398656215,
+      "abs_delta": 0.0017296123705195995
+    },
+    {
+      "role_family": "ml_engineer",
+      "skill": "azure",
+      "demand_ratio_prev": 0.0087699053773367,
+      "demand_ratio_cur": 0.0071160564109199,
+      "abs_delta": 0.0016538489664168002
+    },
+    {
+      "role_family": "data_engineer",
+      "skill": "python",
+      "demand_ratio_prev": 0.0157078955580984,
+      "demand_ratio_cur": 0.0173572228443449,
+      "abs_delta": 0.0016493272862465012
+    },
+    {
+      "role_family": "ml_engineer",
+      "skill": "java",
+      "demand_ratio_prev": 0.0072697899838449,
+      "demand_ratio_cur": 0.0087980333807737,
+      "abs_delta": 0.0015282433969287992
+    },
+    {
+      "role_family": "ml_engineer",
+      "skill": "sql",
+      "demand_ratio_prev": 0.0015001153934918,
+      "demand_ratio_cur": 0.0028464225643679,
+      "abs_delta": 0.0013463071708761
+    },
+    {
+      "role_family": "ml_engineer",
+      "skill": "python",
+      "demand_ratio_prev": 0.0162704823447957,
+      "demand_ratio_cur": 0.0175960667615474,
+      "abs_delta": 0.0013255844167516968
+    },
+    {
+      "role_family": "ml_engineer",
+      "skill": "deep learning",
+      "demand_ratio_prev": 0.0040387722132471,
+      "demand_ratio_cur": 0.002717039720533,
+      "abs_delta": 0.0013217324927141
+    }
+  ]
+}

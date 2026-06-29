@@ -1,0 +1,40 @@
+{
+  "timestamp": "2026-04-12 18:08:52",
+  "n_candidates_evaluated": 8,
+  "weights": {
+    "coverage": 0.8,
+    "semantic": 0.2
+  },
+  "metrics": {
+    "avg_recall_holdout": 0.8125,
+    "avg_miss_rate": 0.1875,
+    "avg_gap_reduction": 0.7348108043909751,
+    "avg_precision_like": 0.03461723198229945,
+    "mae_gap_error_abs": 9.125,
+    "avg_normalized_gap_error": 0.2651891956090248,
+    "recall_holdout_ci95": [
+      0.5625,
+      1.0
+    ],
+    "miss_rate_ci95": [
+      0.0,
+      0.4375
+    ],
+    "gap_reduction_ci95": [
+      0.7026327708502756,
+      0.7563138769021123
+    ],
+    "precision_like_ci95": [
+      0.02443072080412785,
+      0.04111301000140955
+    ],
+    "normalized_gap_error_ci95": [
+      0.24368612309788779,
+      0.2973672291497244
+    ]
+  },
+  "outputs": {
+    "candidate_level_metrics": "C:\\Users\\Nacho\\Documents\\TFM\\ETL\\ETL_workspace\\outputs\\evaluation\\candidate_level_metrics.csv",
+    "role_breakdown": "C:\\Users\\Nacho\\Documents\\TFM\\ETL\\ETL_workspace\\reports\\model_eval_role_breakdown.csv"
+  }
+}
