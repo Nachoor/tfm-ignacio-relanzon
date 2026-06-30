@@ -1,8 +1,8 @@
 {
   "timestamp": "20260416_193509",
   "status": "ok",
-  "current_snapshot": "C:\\Users\\Nacho\\Documents\\TFM\\app\\datanex_clean2\\reports\\drift_snapshots\\role_skill_demand_20260416_193509.csv",
-  "previous_snapshot": "C:\\Users\\Nacho\\Documents\\TFM\\app\\datanex_clean2\\reports\\drift_snapshots\\role_skill_demand_20260316_103131.csv",
+  "current_snapshot": "C:\\Users\\Nacho\\Documents\\TFM\\app\\caiq\\reports\\drift_snapshots\\role_skill_demand_20260416_193509.csv",
+  "previous_snapshot": "C:\\Users\\Nacho\\Documents\\TFM\\app\\caiq\\reports\\drift_snapshots\\role_skill_demand_20260316_103131.csv",
   "global_mean_abs_delta": 0.003665,
   "role_drift": [
     {

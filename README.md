@@ -1,6 +1,6 @@
 # CAIQ - Career Alignment and Insight Qualifier
 
-Trabajo Fin de Master de Ignacio Relanzon. Sistema de orientacion profesional para perfiles en transicion hacia el mercado de datos: extrae competencias desde CV, estima skill gaps frente a roles objetivo y recomienda formacion, masters y ofertas.
+Trabajo Fin de Master de Ignacio Relanzon. CAIQ es un sistema de orientacion profesional para perfiles en transicion hacia el mercado de datos: extrae competencias desde CV, estima skill gaps frente a roles objetivo y recomienda formacion, masters y ofertas.
 
 Aplicacion en produccion: https://huggingface.co/spaces/relan02/caiq
 
@@ -8,38 +8,44 @@ Aplicacion en produccion: https://huggingface.co/spaces/relan02/caiq
 
 ```text
 .
-├── 01_etl/                     # Pipelines de datos, entrenamiento, evaluacion y reportes de investigacion
-│   ├── pipelines/
-│   ├── reports/
-│   └── tests/
-├── app/datanex_clean2/          # Aplicacion Streamlit canonica desplegable en Hugging Face
-│   ├── app.py
-│   ├── datanex_app.py
-│   ├── config/
-│   ├── pipelines/
-│   ├── reports/
-│   └── requirements.txt
-├── docs/validation/             # Validacion del parser de CVs y scripts auxiliares
-│   ├── datasets/
-│   └── scripts/
-├── scripts/
-│   ├── automation/              # Automatizacion: scraping semanal y subida a Hugging Face
-│   └── windows/                 # Lanzadores .bat/.ps1 para Windows Task Scheduler
-├── thesis/                      # Memoria LaTeX y figuras finales del TFM
-│   ├── main.tex
-│   ├── chapters/
-│   └── figures/
-└── .gitignore
+|-- 01_etl/                 # Pipelines de datos, entrenamiento, evaluacion y reportes
+|   |-- pipelines/
+|   |-- reports/
+|   `-- tests/
+|-- app/
+|   `-- caiq/               # Aplicacion Streamlit canonica desplegable en Hugging Face
+|       |-- app.py
+|       |-- caiq_app.py
+|       |-- config/
+|       |-- pipelines/
+|       |-- reports/
+|       `-- requirements.txt
+|-- data/
+|   `-- private/            # Datos personales locales, excluidos de git
+|-- docs/
+|   `-- validation/         # Validacion del parser de CVs y scripts auxiliares
+|       |-- datasets/
+|       |-- cv_cases/
+|       `-- scripts/
+|-- scripts/
+|   |-- automation/         # Automatizacion: scraping semanal y subida a Hugging Face
+|   `-- windows/            # Lanzadores .bat/.ps1 para Windows Task Scheduler
+|-- thesis/                 # Memoria LaTeX, figuras finales y borradores locales excluidos
+|   |-- main.tex
+|   |-- chapters/
+|   |-- figures/
+|   `-- drafts/
+`-- .gitignore
 ```
 
-Las carpetas antiguas duplicadas (`02_modelo`, `03_aplicacion`, `04_validacion/figuras_tfm`, `figures`, `docs/figures`) se retiraron del repositorio. La fuente canonica es la estructura anterior.
+La raiz queda reducida a codigo, documentacion, memoria y carpetas locales ignoradas. Las copias antiguas y duplicadas viven fuera del repo versionado.
 
-## Uso Local
+## Uso local
 
 ### Aplicacion
 
 ```bash
-cd app/datanex_clean2
+cd app/caiq
 pip install -r requirements.txt
 streamlit run app.py
 ```
@@ -73,7 +79,7 @@ cd thesis
 pdflatex main.tex
 ```
 
-## Datos Excluidos
+## Datos excluidos
 
 No se versionan datos personales, outputs regenerables, logs, modelos binarios, borradores Word ni historicos pesados. Ver `.gitignore`.
 

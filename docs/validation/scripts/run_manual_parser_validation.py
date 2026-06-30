@@ -7,7 +7,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[3]
-APP_DIR = ROOT / "app" / "datanex_clean2"
+APP_DIR = ROOT / "app" / "caiq"
 MODEL_PATH = APP_DIR / "pipelines" / "build_datapath_model_advanced.py"
 TAXONOMY_PATH = APP_DIR / "config" / "skills_taxonomy.json"
 VALIDATION_DIR = Path(__file__).resolve().parents[1]

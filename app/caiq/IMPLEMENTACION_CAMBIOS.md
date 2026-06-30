@@ -1,6 +1,6 @@
 # Implementacion de Cambios (Sesion)
 
-Este documento resume todo lo implementado en la app `datanex_app.py`.
+Este documento resume todo lo implementado en la app `caiq_app.py`.
 
 ## 1) UX/UI visual y profesional
 - Se sustituyeron tablas por tarjetas visuales para masters, cursos y empleos.
@@ -42,5 +42,5 @@ Este documento resume todo lo implementado en la app `datanex_app.py`.
 
 ## 7) Estado de despliegue
 - Se preparo despliegue en Hugging Face Spaces.
-- Se creo y uso `datanex-v2`.
+- Se creo y uso `caiq-v2`.
 - Se cambio configuracion a `sdk: docker` para mayor control de arranque.

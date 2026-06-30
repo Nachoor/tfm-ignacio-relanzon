@@ -1,11 +1,13 @@
 # ============================================================
-#  CAIQ – .gitignore
+# CAIQ - .gitignore
 # ============================================================
 
-# --- DATOS PERSONALES (nunca subir) ---
+# --- Datos personales: nunca subir ---
+data/private/
 04_validacion/casos_cv/
+docs/validation/outputs/
 
-# --- DATOS SCRAPEADOS Y PROCESADOS (volumen + no código) ---
+# --- Datos scrapeados y procesados: volumen y no codigo ---
 scrappings/
 _historico/
 01_etl/outputs/
@@ -15,23 +17,23 @@ _historico/
 02_modelo/artefactos/recommendation_summary.json
 job_url_status.csv
 
-# --- MODELOS BINARIOS (regenerables con los pipelines) ---
+# --- Modelos binarios regenerables ---
 02_modelo/artefactos/*.pkl
 01_etl/reports/model_*.pkl
 
-# --- LOGS ---
+# --- Logs ---
 logs/
 *.log
 **/streamlit*.log
 
-# --- COPIAS LEGACY / DUPLICADAS ---
+# --- Copias legacy y duplicadas ---
 02_modelo/
 03_aplicacion/
-04_validacion/figuras_tfm/
+04_validacion/
 /figures/
 /docs/figures/
 
-# --- PYTHON ---
+# --- Python ---
 __pycache__/
 *.py[cod]
 *.pyo
@@ -39,17 +41,19 @@ __pycache__/
 *.egg-info/
 dist/
 build/
+.pytest_cache/
 .env
 .venv/
 venv/
 
-# --- DOCUMENTOS WORD (borradores TFM, no código) ---
+# --- Documentos Word y borradores TFM ---
+thesis/drafts/
 *.docx
 ~$*.docx
 *.tmp
 ~WRL*.tmp
 
-# --- LATEX (salida compilada) ---
+# --- LaTeX: salida compilada ---
 *.aux
 *.bbl
 *.blg
@@ -61,7 +65,7 @@ venv/
 *.toc
 *.pdf
 
-# --- SISTEMA ---
+# --- Sistema ---
 .DS_Store
 Thumbs.db
 desktop.ini

@@ -6,5 +6,5 @@
   "corr": 0.8959,
   "p50_abs_error": 0.094,
   "p90_abs_error": 0.2586,
-  "details_csv": "C:\\Users\\Nacho\\Documents\\TFM\\app\\datanex_clean2\\reports\\matching_eval_details.csv"
+  "details_csv": "C:\\Users\\Nacho\\Documents\\TFM\\app\\caiq\\reports\\matching_eval_details.csv"
 }

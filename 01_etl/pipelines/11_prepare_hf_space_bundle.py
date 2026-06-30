@@ -1,5 +1,5 @@
 """11_prepare_hf_space_bundle.py
-Create a lightweight Hugging Face Spaces bundle for Datanex.
+Create a lightweight Hugging Face Spaces bundle for CAIQ.
 
 Output:
 - hf_space_bundle/ (ready-to-upload Space folder)
@@ -19,7 +19,7 @@ def copy_file(src: Path, dst: Path) -> None:
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="Prepare Hugging Face Space bundle for Datanex")
+    ap = argparse.ArgumentParser(description="Prepare Hugging Face Space bundle for CAIQ")
     ap.add_argument("--etl-dir", default=None)
     ap.add_argument("--out-dir", default="")
     ap.add_argument("--max-jobs", type=int, default=120000, help="Max rows for jobs_features compact export")
@@ -34,13 +34,13 @@ def main() -> None:
 
     # App entry + dependencies
     copy_file(etl_dir / "app.py", out_dir / "app.py")
-    copy_file(etl_dir / "datanex_app.py", out_dir / "datanex_app.py")
+    copy_file(etl_dir / "caiq_app.py", out_dir / "caiq_app.py")
     copy_file(etl_dir / "requirements.txt", out_dir / "requirements.txt")
     # Keep compatibility with Spaces templates that use src/streamlit_app.py as launcher.
     src_streamlit = out_dir / "src" / "streamlit_app.py"
     src_streamlit.parent.mkdir(parents=True, exist_ok=True)
     src_streamlit.write_text(
-        "from datanex_app import main\n\nif __name__ == '__main__':\n    main()\n",
+        "from caiq_app import main\n\nif __name__ == '__main__':\n    main()\n",
         encoding="utf-8",
     )
 
@@ -91,12 +91,12 @@ def main() -> None:
         "\n".join(
             [
                 "---",
-                "title: Datanex",
+                "title: CAIQ",
                 "sdk: streamlit",
                 "app_file: src/streamlit_app.py",
                 "---",
                 "",
-                "# Datanex",
+                "# CAIQ",
                 "",
                 "Demo app for data-career guidance:",
                 "- CV/Resume -> skill extraction",

@@ -2,7 +2,7 @@
 run_validation_500cvs.py
 ========================
 Re-ejecuta la validación del parser y el estudio de ablación del recomendador
-usando los 500 CVs del corpus ampliado (04_validacion/casos_cv/).
+usando los 500 CVs del corpus ampliado (data/private/cv_cases/).
 
 - Parser validation: combina las 88 anotaciones manuales existentes con
   auto-anotaciones extraídas de la sección HABILIDADES del PDF para los CVs nuevos.
@@ -32,12 +32,12 @@ import pdfplumber
 ROOT         = Path(__file__).resolve().parents[3]
 SCRIPT_DIR   = Path(__file__).resolve().parent
 VALIDATION   = SCRIPT_DIR.parent
-CV_DIR       = ROOT / "04_validacion" / "casos_cv"          # 500 CVs
+CV_DIR       = ROOT / "data" / "private" / "cv_cases"       # 500 CVs
 OLD_CV_DIR   = VALIDATION / "cv_cases"                      # 88 CVs originales
 OUT_DIR      = VALIDATION / "outputs"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
-APP_DIR      = ROOT / "app" / "datanex_clean2"
+APP_DIR      = ROOT / "app" / "caiq"
 MODEL_PATH   = APP_DIR / "pipelines" / "build_datapath_model_advanced.py"
 TAXONOMY_PATH = APP_DIR / "config" / "skills_taxonomy.json"
 ETL_CURATED  = ROOT / "01_etl" / "outputs" / "curated"

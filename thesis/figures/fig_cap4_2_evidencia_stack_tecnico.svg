@@ -2165,7 +2165,7 @@ z
     </g>
    </g>
    <g id="text_7">
-    <!-- app/datanex_clean2/requirements.txt -->
+    <!-- app/caiq/requirements.txt -->
     <g style="fill: #607d8b" transform="translate(602.7795 122.40471) scale(0.077 -0.077)">
      <defs>
       <path id="DejaVuSans-71" d="M 947 1747 
@@ -2510,7 +2510,7 @@ z
     </g>
    </g>
    <g id="text_11">
-    <!-- app/datanex_clean2/pipelines/build_datapath_model_advanced.py -->
+    <!-- app/caiq/pipelines/build_datapath_model_advanced.py -->
     <g style="fill: #607d8b" transform="translate(76.437 414.94384) scale(0.077 -0.077)">
      <use xlink:href="#DejaVuSans-61"/>
      <use xlink:href="#DejaVuSans-70" transform="translate(61.279297 0)"/>
@@ -3135,7 +3135,7 @@ z
     </g>
    </g>
    <g id="text_15">
-    <!-- app/datanex_clean2/Dockerfile -->
+    <!-- app/caiq/Dockerfile -->
     <g style="fill: #607d8b" transform="translate(602.7795 414.94384) scale(0.077 -0.077)">
      <defs>
       <path id="DejaVuSans-44" d="M 1259 4147 

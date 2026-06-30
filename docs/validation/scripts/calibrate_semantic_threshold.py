@@ -33,7 +33,7 @@ OUTPUT_DIR   = VALIDATION / "outputs"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 # Añadir el path del modelo al sys.path
-PROJECT_ROOT = VALIDATION.parent.parent / "app" / "datanex_clean2"
+PROJECT_ROOT = VALIDATION.parent.parent / "app" / "caiq"
 sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(PROJECT_ROOT / "pipelines"))
 

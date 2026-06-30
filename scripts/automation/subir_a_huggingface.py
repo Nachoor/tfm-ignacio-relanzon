@@ -1,4 +1,4 @@
-﻿import os
+import os
 from pathlib import Path
 from huggingface_hub import HfApi
 
@@ -6,11 +6,11 @@ TOKEN = os.environ.get("HF_TOKEN", "")
 SPACE = "relan02/caiq"
 
 ROOT = Path(__file__).resolve().parents[2]
-APP_DIR = ROOT / "app" / "datanex_clean2"
+APP_DIR = ROOT / "app" / "caiq"
 DATA_DIR = APP_DIR / "outputs" / "curated"
 
 ARCHIVOS = [
-    (APP_DIR / "datanex_app.py", "datanex_app.py"),
+    (APP_DIR / "caiq_app.py", "caiq_app.py"),
     (APP_DIR / "requirements.txt", "requirements.txt"),
     (APP_DIR / "packages.txt", "packages.txt"),
     (APP_DIR / "pipelines" / "build_datapath_model_advanced.py", "pipelines/build_datapath_model_advanced.py"),

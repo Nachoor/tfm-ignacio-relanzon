@@ -1,7 +1,7 @@
 @echo off
 setlocal
 
-set "APP_DIR=C:\Users\Nacho\Documents\TFM\app\datanex_clean2"
+set "APP_DIR=C:\Users\Nacho\Documents\TFM\app\caiq"
 set "APP_URL=http://localhost:8501"
 
 cd /d "%APP_DIR%"

@@ -1,5 +1,5 @@
 """Hugging Face Spaces entrypoint for CAIQ."""
-from datanex_app import main
+from caiq_app import main
 
 
 if __name__ == "__main__":

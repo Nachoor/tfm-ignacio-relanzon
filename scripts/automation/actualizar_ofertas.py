@@ -1,4 +1,4 @@
-﻿"""
+"""
 actualizar_ofertas.py
 =====================
 Pipeline completo de refresco de ofertas de empleo para CAIQ.
@@ -47,7 +47,7 @@ except Exception:
 
 # â”€â”€â”€ Rutas â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 ROOT      = Path(__file__).resolve().parents[2]
-APP_DIR   = ROOT / "app" / "datanex_clean2"
+APP_DIR   = ROOT / "app" / "caiq"
 OUT_SEM   = APP_DIR / "outputs" / "semantic"
 OUT_CUR   = APP_DIR / "outputs" / "curated"
 TAXONOMY  = APP_DIR / "config" / "skills_taxonomy.json"
